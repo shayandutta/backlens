@@ -1,0 +1,33 @@
+{
+  "name": "backlens",
+  "version": "0.1.0",
+  "description": "Run your Node backend through backlens and see every request, every query, and what is wrong with them.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "backlens": "bin/backlens.js"
+  },
+  "exports": {
+    "./register": "./register.cjs"
+  },
+  "files": [
+    "bin",
+    "register.cjs",
+    "server.js",
+    "analyze.js",
+    "report.js",
+    "config.js",
+    "runner.js",
+    "ui.html"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "typescript": "^5.9.3"
+  }
+}
