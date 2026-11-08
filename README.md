@@ -151,7 +151,7 @@ cd backlens && npm install
 node --test test/
 ```
 
-Bug reports and pull requests are welcome.
+Bug reports and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). To report a security problem privately, see [SECURITY.md](SECURITY.md).
 
 ## License
 
