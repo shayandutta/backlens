@@ -425,14 +425,18 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
         // Recorded requests on a route since the last fix kept there (the code they ran is the
         // code being changed now), oldest first.
         routeTraces: (route) => {
-          const since = Math.max(0, ...[...fixedAt].filter(([key]) => key.split('|')[1] === route).map(([, at]) => at));
+          const since = fixedAt.get(`route:${route}`) || 0;
           return traces.filter((t) => t.at > since && routeOf(t.method, t.url, t.template) === route);
         },
         markFixed: (key, after) => {
-          fixedAt.set(key, Date.now());
+          const now = Date.now();
+          fixedAt.set(key, now);
+          // The code behind this route changed: issues from its older requests point at old
+          // lines, so they wait for a request on the new code (the after-fix one below, or later).
+          fixedAt.set(`route:${key.split('|')[1]}`, now);
           if (after) {
             const { replayOf, ...trace } = after;
-            traces.push({ ...trace, afterFix: true });
+            traces.push({ ...trace, at: now + 1, afterFix: true });
             received++;
             if (traces.length > KEEP) replays.delete(traces.shift().id);
           }

@@ -237,8 +237,8 @@ function percentile(values, p) {
 
 /** Routes and issues across every trace kept. */
 /**
- * fixed: issue key -> when a fix for it was kept. Such an issue is hidden until a request after
- * that moment shows it again.
+ * fixed: issue key -> when a fix for it was kept, and 'route:<route>' -> when code behind that
+ * route changed. Such issues are hidden until a request after that moment shows them again.
  */
 export function summarize(traces, known = [], advice = [], fixed = new Map()) {
   const routes = new Map();
@@ -323,7 +323,8 @@ export function summarize(traces, known = [], advice = [], fixed = new Map()) {
     if (!routes.has(route)) routes.set(route, { route, calls: 0, durations: [], queries: 0, redis: 0, http: 0, errors: 0, issueKeys: new Set(), last: 0 });
   }
   for (const [key, issue] of issues) {
-    if (fixed.has(key) && fixed.get(key) >= (issue.lastAt || 0)) {
+    const since = Math.max(fixed.get(key) || 0, fixed.get(`route:${issue.route}`) || 0);
+    if (since && since >= (issue.lastAt || 0)) {
       issues.delete(key);
       routes.get(issue.route)?.issueKeys.delete(key);
     }

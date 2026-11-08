@@ -172,3 +172,13 @@ test('a kept fix hides its issue until a later request shows it again', () => {
   const back = summarize([before, repeated(3000)], [], [], fixed);
   assert.equal(back.issues.length, 1);
 });
+
+test('after a change on a route, issues from its older requests wait for a new request', () => {
+  const nPlusOne = (line, at) => ({ ...trace([1, 2, 3].map((i) => db('select name from users where id = $1', i * 2, 1, `p${i}`, 'loop', line))), at });
+  const old = nPlusOne(47, 1000);
+  const moved = nPlusOne(49, 3000);
+  const fixed = new Map([['route:GET /orders/:id', 2000]]);
+  const { issues } = summarize([old, moved], [], [], fixed);
+  assert.equal(issues.length, 1);
+  assert.match(issues[0].sites[0], /:49$/);
+});
