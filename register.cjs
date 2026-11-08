@@ -31,6 +31,8 @@ const MAX_SPANS = 300;
 if (TARGET && !globalThis.__backlens) {
   globalThis.__backlens = true;
   const storage = new AsyncLocalStorage();
+  // The app code that called an ORM operation, for the queries that operation runs later.
+  const siteStorage = new AsyncLocalStorage();
   const agent = new http.Agent({ keepAlive: true, maxSockets: 4 });
 
   const now = () => performance.now();
@@ -86,6 +88,9 @@ if (TARGET && !globalThis.__backlens) {
     }
   }
 
+  // Generated ORM clients live in the project but are not the app's code (Prisma's `output`).
+  const GENERATED = /[\\/]generated[\\/]prisma[\\/]/;
+
   /** The first few frames of app code that led to this call, skipping node, node_modules and backlens. */
   function appFrames() {
     // Recording must never break the app: a failure here costs only the location.
@@ -111,7 +116,7 @@ if (TARGET && !globalThis.__backlens) {
       if (raw.startsWith('node:') || raw.includes('node_modules') || raw.startsWith(SELF) || !raw.startsWith('/')) continue;
       // Chunks bundle libraries too, so node_modules is checked again after mapping.
       const at = original(raw, Number(m[3]), Number(m[4]));
-      if (at.file.includes('node_modules') || at.file.startsWith(SELF) || !at.file.startsWith('/')) continue;
+      if (at.file.includes('node_modules') || GENERATED.test(at.file) || at.file.startsWith(SELF) || !at.file.startsWith('/')) continue;
       frames.push({ fn: (m[1] || '').replace(/^async /, '') || '(anonymous)', file: path.relative(ROOT, at.file), line: at.line });
       if (frames.length === 8) break;
     }
@@ -165,7 +170,10 @@ if (TARGET && !globalThis.__backlens) {
   function begin(kind, name, extra) {
     const trace = storage.getStore();
     if (!trace || trace.spans.length >= MAX_SPANS) return null;
-    const span = { kind, name, start: round(now() - trace.began), duration: 0, frames: appFrames(), ...extra };
+    let frames = appFrames();
+    // ORMs that batch or schedule queries lose the async stack; fall back to where the app called the ORM.
+    if (!frames.length) frames = (siteStorage.getStore() || {}).frames || [];
+    const span = { kind, name, start: round(now() - trace.began), duration: 0, frames, ...extra };
     trace.spans.push(span);
     const t0 = now();
     const end = (detail) => {
@@ -206,7 +214,7 @@ if (TARGET && !globalThis.__backlens) {
   // project actually has.
   function patchFromApp() {
     const fromApp = Module.createRequire(path.join(process.cwd(), 'backlens-probe.js'));
-    for (const name of ['pg', 'ioredis', 'redis', '@redis/client']) {
+    for (const name of ['pg', 'ioredis', 'redis', '@redis/client', '@prisma/client']) {
       try {
         fromApp.resolve(name);
       } catch {
@@ -277,6 +285,8 @@ if (TARGET && !globalThis.__backlens) {
         if (aborted) trace.aborted = true;
         trace.duration = round(now() - trace.began);
         delete trace.began;
+        // Spans reported after the fact (Prisma's engine) are added late: keep them in time order.
+        trace.spans.sort((a, b) => a.start - b.start);
         send(trace);
       };
       res.once('finish', () => finish(false));
@@ -584,6 +594,130 @@ if (TARGET && !globalThis.__backlens) {
     };
   }
 
+  // ---- Prisma ---------------------------------------------------------------------------
+  // Prisma 7, and Prisma 6 with a driver adapter, run SQL through `pg`, recorded already. Prisma 5
+  // and 6 on the Rust engine run it inside the engine, which reports each statement with its
+  // timing to a tracing helper (the hook @prisma/instrumentation uses); see prismaTracing below.
+  //
+  // Prisma's promises are lazy and findUnique calls are batched, so by the time SQL runs the
+  // app's line is gone from the stack. Each client builds its promises with _createPrismaPromise
+  // (set per instance), called right where the app calls a model method: the line is taken there.
+  // _request then adds hashes of the operation's arguments, which the engine does not report.
+  const prismaClients = new WeakMap();
+  function scalarsOf(value, out = [], depth = 0) {
+    if (out.length >= 60 || depth > 6 || value === null || value === undefined) return out;
+    if (typeof value === 'object') {
+      if (value instanceof Date) out.push(value.toISOString());
+      else for (const v of Array.isArray(value) ? value : Object.values(value)) scalarsOf(v, out, depth + 1);
+    } else out.push(value);
+    return out;
+  }
+  function wrapPrismaPromises(client) {
+    try {
+      const create = client._createPrismaPromise;
+      if (typeof create !== 'function' || create.__backlens) return;
+      const wrapped = function (callback) {
+        if (typeof callback !== 'function' || !storage.getStore()) return create.apply(this, arguments);
+        const frames = appFrames();
+        if (!frames.length) return create.apply(this, arguments);
+        const args = [...arguments];
+        args[0] = function () {
+          return siteStorage.run({ frames }, () => callback.apply(this, arguments));
+        };
+        return create.apply(this, args);
+      };
+      wrapped.__backlens = true;
+      client._createPrismaPromise = wrapped;
+    } catch {}
+  }
+  function patchPrisma(mod) {
+    const Client = mod.PrismaClient;
+    if (typeof Client !== 'function' || Client.__backlens || !Client.prototype || typeof Client.prototype._request !== 'function') return;
+    const proto = Client.prototype;
+    if (!proto.__backlens) {
+      proto.__backlens = true;
+      const request = proto._request;
+      proto._request = function (params) {
+        if (!storage.getStore()) return request.apply(this, arguments);
+        const outer = siteStorage.getStore();
+        const args = params && params.args;
+        const op = { frames: (outer && outer.frames) || appFrames(), params: hashValues(args), took: paramPrints(scalarsOf(args)), spans: [] };
+        const result = siteStorage.run(op, () => request.apply(this, arguments));
+        if (!result || typeof result.then !== 'function') return result;
+        return result.then((res) => {
+          try {
+            const rows = Array.isArray(res) ? res : res && typeof res === 'object' ? [res] : undefined;
+            const gave = resultPrints(rows);
+            for (const span of op.spans) {
+              if (span.rows === undefined && rows) span.rows = rows.length;
+              if (gave && !span.gave) span.gave = gave;
+            }
+          } catch {}
+          return res;
+        });
+      };
+    }
+    let Wrapped = prismaClients.get(Client);
+    if (!Wrapped) {
+      Wrapped = class PrismaClient extends Client {
+        constructor() {
+          super(...arguments);
+          wrapPrismaPromises(this);
+        }
+      };
+      Wrapped.__backlens = true;
+      prismaClients.set(Client, Wrapped);
+    }
+    try {
+      mod.PrismaClient = Wrapped;
+    } catch {}
+  }
+
+  // Installed only when the app has no tracing of its own, which would take precedence anyway.
+  // Only requests being recorded are sampled; the engine collects nothing for the rest.
+  function prismaTracing() {
+    const g = globalThis;
+    if (g.PRISMA_INSTRUMENTATION || Object.keys(g).some((k) => /^V\d+_PRISMA_INSTRUMENTATION$/.test(k))) return;
+    const hex = (n) => require('node:crypto').randomBytes(n).toString('hex');
+    const ms = (t) => (Array.isArray(t) ? t[0] * 1e3 + t[1] / 1e6 : Number(t));
+    g.PRISMA_INSTRUMENTATION = {
+      helper: {
+        isEnabled: () => true,
+        getTraceParent: () => `00-${hex(16)}-${hex(8)}-${storage.getStore() ? '01' : '00'}`,
+        getActiveContext: () => undefined,
+        runInChildSpan: (_options, callback) => callback(),
+        dispatchEngineSpans(spans) {
+          try {
+            const trace = storage.getStore();
+            if (!trace || trace.began === undefined || !Array.isArray(spans)) return;
+            const op = siteStorage.getStore();
+            for (const s of spans) {
+              const text = s && s.name === 'prisma:engine:db_query' && s.attributes && (s.attributes['db.query.text'] || s.attributes['db.statement']);
+              if (typeof text !== 'string' || trace.spans.length >= MAX_SPANS) continue;
+              const name = text.replace(/\s+/g, ' ').trim().slice(0, 600);
+              const start = round(ms(s.startTime) - performance.timeOrigin - trace.began);
+              // With a driver adapter the same statement already came through pg.
+              if (trace.spans.some((x) => x.kind === 'db' && !x.engine && x.name === name && Math.abs(x.start - start) < 3)) continue;
+              const span = {
+                kind: 'db',
+                name,
+                start,
+                duration: round(ms(s.endTime) - ms(s.startTime)),
+                frames: (op && op.frames) || appFrames(),
+                params: op ? op.params : null,
+                took: op ? op.took : undefined,
+                engine: true,
+              };
+              trace.spans.push(span);
+              if (op) op.spans.push(span);
+            }
+          } catch {}
+        },
+      },
+    };
+  }
+  prismaTracing();
+
   // ---- outgoing http and https (axios, got, node-fetch, SDKs) ---------------------------
   // Global fetch runs on undici and never reaches these, so nothing is counted twice. The
   // recorder's own reports run outside any request, where begin() records nothing.
@@ -695,6 +829,7 @@ if (TARGET && !globalThis.__backlens) {
       else if (request === 'ioredis') patchIoredis(exported);
       else if (request === 'fastify') return wrapFastify(exported);
       else if (request.endsWith('/commands-queue')) patchRedisQueue(exported);
+      else if (exported && typeof exported.PrismaClient === 'function') patchPrisma(exported);
     } catch {}
     return exported;
   };

@@ -133,3 +133,39 @@ server.listen(0, () => process.send(server.address().port));`;
   assert.equal(spans[1].hit, false);
   assert.ok(!JSON.stringify(traces).includes('hunter2'));
 });
+
+test('Prisma engine queries are recorded with the app line and argument hashes, never the values', async () => {
+  // Shaped like Prisma 6 on its Rust engine: lazy promises built per instance, the operation run
+  // on a later tick, and the SQL reported to the global tracing helper afterwards.
+  const prisma = `class PrismaClient {
+  constructor() {
+    this._createPrismaPromise = (callback) => ({ then: (ok, fail) => new Promise((r) => setImmediate(r)).then(() => callback()).then(ok, fail) });
+    this.user = { findUnique: (args) => this._createPrismaPromise(() => this._request({ model: 'User', action: 'findUnique', args })) };
+  }
+  async _request() {
+    const started = Date.now();
+    await new Promise((r) => setTimeout(r, 2));
+    const helper = globalThis.PRISMA_INSTRUMENTATION && globalThis.PRISMA_INSTRUMENTATION.helper;
+    if (helper && helper.isEnabled()) {
+      const t = (ms) => [Math.floor(ms / 1000), (ms % 1000) * 1e6];
+      helper.dispatchEngineSpans([{ name: 'prisma:engine:db_query', startTime: t(started), endTime: t(Date.now()), attributes: { 'db.query.text': 'SELECT "name" FROM "User" WHERE "id" = $1 LIMIT $2' } }]);
+    }
+    return { name: 'someone' };
+  }
+}
+exports.PrismaClient = PrismaClient;`;
+  const app = `const http = require('node:http');
+const { PrismaClient } = require('./generated/prisma/client');
+const db = new PrismaClient();
+const server = http.createServer(async (req, res) => {
+  for (const id of [101, 102, 103]) await db.user.findUnique({ where: { id, email: 'secret@example.com' } });
+  res.end('ok');
+});
+server.listen(0, () => process.send(server.address().port));`;
+  const traces = await record(['/p'], { 'generated/prisma/client.js': prisma, 'prisma-app.js': app }, 'prisma-app.js');
+  const spans = traces.find((t) => t.url === '/p').spans.filter((s) => s.kind === 'db');
+  assert.equal(spans.length, 3);
+  assert.deepEqual(spans[0].frames[0], { fn: 'Server.<anonymous>', file: 'prisma-app.js', line: 5 });
+  assert.equal(new Set(spans.map((s) => s.params)).size, 3, 'each call is told apart by its arguments');
+  assert.ok(!JSON.stringify(traces).includes('secret@example.com'));
+});
