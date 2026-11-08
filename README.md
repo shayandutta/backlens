@@ -12,6 +12,10 @@ The link backlens prints carries a private token: keep it to yourself, it contro
 
 To run one exact command instead: `npx backlens -- node server.js`.
 
+To keep it in the project, install it as a dev dependency with your package manager (`npm i -D backlens`, `pnpm add -D backlens`, `yarn add -D backlens`). In a pnpm or yarn workspace, use that tool: npm cannot install into a project whose package.json uses `workspace:` versions.
+
+The dashboard uses port 7777, or the next free one if it is taken. `--port` picks one.
+
 ## What you get
 
 - **Routes**: every endpoint your app registers (fastify and nest report them at startup; express routes appear once called), with calls, p50 and p95, and how many database, Redis and outgoing HTTP calls each request makes.

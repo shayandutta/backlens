@@ -42,19 +42,25 @@ if (testMode) await runTests();
 else await runStudio();
 
 async function runStudio() {
-  const port = Number(flag('--port') ?? 7777);
+  const chosen = flag('--port');
+  // Without --port, a busy 7777 (another backlens, say) moves on to the next free port.
+  const ports = chosen ? [Number(chosen)] : Array.from({ length: 20 }, (_, i) => 7777 + i);
   let server;
-  try {
-    server = await startServer({
-      port,
-      root,
-      token,
-      manualArgv: command.length ? command : null,
-      mirror: (line, stream) => process.stderr.write(`${dim('app │')} ${stream === 'sys' ? dim(line) : line}\n`),
-    });
-  } catch (err) {
-    process.stderr.write(`backlens: could not open port ${port} (${err.code ?? err.message}). Try --port.\n`);
-    process.exit(1);
+  for (const port of ports) {
+    try {
+      server = await startServer({
+        port,
+        root,
+        token,
+        manualArgv: command.length ? command : null,
+        mirror: (line, stream) => process.stderr.write(`${dim('app │')} ${stream === 'sys' ? dim(line) : line}\n`),
+      });
+      break;
+    } catch (err) {
+      if (err.code === 'EADDRINUSE' && port !== ports.at(-1)) continue;
+      process.stderr.write(`backlens: could not open port ${port} (${err.code ?? err.message}). Try --port.\n`);
+      process.exit(1);
+    }
   }
   const link = `http://localhost:${server.address().port}/?t=${token}`;
   process.stderr.write(`${bold('backlens')} dashboard ${bold(link)}\n${dim('         keep this link private: it controls your app. Ctrl+C stops everything.')}\n\n`);
