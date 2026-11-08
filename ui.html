@@ -790,7 +790,7 @@ function compareCard(j) {
 let idx = {};
 async function loadIndexInfo() {
   idx.loading = true;
-  try { idx.db = await aiPost('/api/index/info', {}); } catch (err) { idx.dbError = err.message; }
+  try { idx.db = await aiPost('/api/index/info', { key: fixJob && fixJob.issueKey }); } catch (err) { idx.dbError = err.message; }
   idx.loading = false;
   renderFix();
 }

@@ -35,6 +35,20 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
   // Issue key -> the index created for it from the dashboard, so Undo still knows it.
   const createdIndexes = new Map();
 
+  /** Sends a recorded read to the app without recording it, so the app opens its connections. */
+  function warmUp(port, payload) {
+    return new Promise((resolve) => {
+      const r = http.request({ host: '127.0.0.1', port, method: payload.method, path: payload.url, headers: { ...payload.headers, 'x-backlens': 'skip' } }, (res) => {
+        res.resume();
+        res.on('end', resolve);
+      });
+      r.setTimeout(20000, () => r.destroy());
+      r.on('error', resolve);
+      r.on('close', resolve);
+      r.end();
+    });
+  }
+
   /** Sends one command to the recorder inside the app (see register.cjs). */
   function appCommand(port, body) {
     return new Promise((resolve, reject) => {
@@ -337,14 +351,24 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
       if (!app || !app.port) return json(res, 409, { error: 'The app is not running. Start it first.' });
       const body = (await readJson(req)) || {};
       let index = null;
+      const { issues } = summarize(traces, [...known.keys()], [...advice.values()]);
+      const issue = issues.find((i) => i.key === body.key);
       if (action !== 'info') {
-        const { issues } = summarize(traces, [...known.keys()], [...advice.values()]);
-        const issue = issues.find((i) => i.key === body.key);
         index = issue && issue.index ? issue.index : createdIndexes.get(body.key);
         if (!index) return json(res, 404, { error: 'That suggestion is gone. Refresh the list.' });
       }
       try {
-        const out = await appCommand(app.port, { action, ...(index || {}) });
+        let out;
+        try {
+          out = await appCommand(app.port, { action, ...(index || {}) });
+        } catch (err) {
+          // A restarted app has no database connection until a request uses one. Replay the
+          // request that showed the issue once, unrecorded, so it opens one, then try again.
+          const payload = issue && replays.get(issue.example);
+          if (!/not used Postgres yet/.test(err.message) || !payload || !['GET', 'HEAD'].includes(payload.method)) throw err;
+          await warmUp(app.port, payload);
+          out = await appCommand(app.port, { action, ...(index || {}) });
+        }
         if (action === 'create') {
           createdIndexes.set(body.key, index);
           fixedAt.set(body.key, Date.now());
