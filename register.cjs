@@ -8,6 +8,7 @@
 
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { createHash, randomUUID } = require('node:crypto');
+const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
 const Module = require('node:module');
@@ -15,7 +16,15 @@ const path = require('node:path');
 const { performance } = require('node:perf_hooks');
 
 const TARGET = process.env.BACKLENS_URL;
-const ROOT = process.env.BACKLENS_ROOT || process.cwd();
+// Stack traces hold real paths, so a project reached through a symlink must be resolved too.
+const ROOT = (() => {
+  const root = process.env.BACKLENS_ROOT || process.cwd();
+  try {
+    return fs.realpathSync(root);
+  } catch {
+    return root;
+  }
+})();
 const SELF = __dirname;
 const MAX_SPANS = 300;
 
@@ -27,8 +36,67 @@ if (TARGET && !globalThis.__backlens) {
   const now = () => performance.now();
   const round = (n) => Math.round(n * 100) / 100;
 
+  /**
+   * Bundlers (Next.js with Turbopack or webpack, and other build steps) run code from generated
+   * chunks, and some, like Next.js, map stack traces themselves instead of letting Node do it. So
+   * backlens reads each chunk's source map itself, cached per file until the file changes.
+   */
+  const maps = new Map();
+  function sourceMapOf(file) {
+    if (!/\.[cm]?js$/.test(file)) return null;
+    let mtime;
+    try {
+      mtime = fs.statSync(file).mtimeMs;
+    } catch {
+      return null;
+    }
+    const hit = maps.get(file);
+    if (hit && hit.mtime === mtime) return hit.map;
+    let map = null;
+    try {
+      const text = fs.readFileSync(file, 'utf8');
+      const url = text.slice(-4096).match(/\/\/[#@] sourceMappingURL=(\S+)\s*$/);
+      if (url) {
+        const payload = url[1].startsWith('data:')
+          ? JSON.parse(Buffer.from(url[1].slice(url[1].indexOf(',') + 1), /;base64,/.test(url[1]) ? 'base64' : 'utf8').toString())
+          : JSON.parse(fs.readFileSync(path.resolve(path.dirname(file), decodeURIComponent(url[1])), 'utf8'));
+        map = new Module.SourceMap(payload);
+      }
+    } catch {
+      map = null;
+    }
+    if (maps.size > 500) maps.clear();
+    maps.set(file, { mtime, map });
+    return map;
+  }
+
+  /** Where a generated line and column came from, or the input unchanged when there is no map. */
+  function original(file, line, column) {
+    const map = sourceMapOf(file);
+    if (!map) return { file, line };
+    try {
+      const entry = map.findEntry(line - 1, column - 1);
+      if (!entry || !entry.originalSource) return { file, line };
+      let source = entry.originalSource;
+      if (source.startsWith('file://')) source = decodeURIComponent(new URL(source).pathname);
+      else if (!path.isAbsolute(source)) source = path.resolve(path.dirname(file), map.payload.sourceRoot || '', source);
+      return { file: source, line: entry.originalLine + 1 };
+    } catch {
+      return { file, line };
+    }
+  }
+
   /** The first few frames of app code that led to this call, skipping node, node_modules and backlens. */
   function appFrames() {
+    // Recording must never break the app: a failure here costs only the location.
+    try {
+      return collectFrames();
+    } catch {
+      return [];
+    }
+  }
+
+  function collectFrames() {
     // Database drivers and ORMs alone can fill the default 10 frames; look deeper for app code.
     const limit = Error.stackTraceLimit;
     Error.stackTraceLimit = 80;
@@ -39,9 +107,12 @@ if (TARGET && !globalThis.__backlens) {
     for (const line of lines) {
       const m = line.match(/at (?:(.+?) \()?(.+?):(\d+):(\d+)\)?$/);
       if (!m) continue;
-      const file = m[2].replace(/^file:\/\//, '');
-      if (file.startsWith('node:') || file.includes('node_modules') || file.startsWith(SELF) || !file.startsWith('/')) continue;
-      frames.push({ fn: (m[1] || '').replace(/^async /, '') || '(anonymous)', file: path.relative(ROOT, file), line: Number(m[3]) });
+      const raw = m[2].replace(/^file:\/\//, '');
+      if (raw.startsWith('node:') || raw.includes('node_modules') || raw.startsWith(SELF) || !raw.startsWith('/')) continue;
+      // Chunks bundle libraries too, so node_modules is checked again after mapping.
+      const at = original(raw, Number(m[3]), Number(m[4]));
+      if (at.file.includes('node_modules') || at.file.startsWith(SELF) || !at.file.startsWith('/')) continue;
+      frames.push({ fn: (m[1] || '').replace(/^async /, '') || '(anonymous)', file: path.relative(ROOT, at.file), line: at.line });
       if (frames.length === 8) break;
     }
     return frames;
@@ -148,6 +219,10 @@ if (TARGET && !globalThis.__backlens) {
   }
 
   // ---- incoming requests -------------------------------------------------------------
+  // Framework internals and browser asset fetches, not the app's own routes: Next.js build
+  // assets, dev overlay and HMR, Vite dev files, favicons and source maps.
+  const INTERNAL = /^\/(?:_next\/|__nextjs|@vite\/|@fs\/|@id\/|node_modules\/|favicon\.ico(?:$|\?))|\.map(?:$|\?)/;
+
   for (const Server of [http.Server, https.Server]) {
     const emit = Server.prototype.emit;
     Server.prototype.emit = function (event, req, res) {
@@ -157,7 +232,7 @@ if (TARGET && !globalThis.__backlens) {
           if (address && typeof address === 'object') post('/listening', { port: address.port, pid: process.pid, source: SOURCE });
         } catch {}
       }
-      if (event !== 'request' || !req || !res || req.headers['x-backlens'] === 'skip') return emit.apply(this, arguments);
+      if (event !== 'request' || !req || !res || req.headers['x-backlens'] === 'skip' || INTERNAL.test(req.url || '')) return emit.apply(this, arguments);
       const trace = {
         id: randomUUID(),
         pid: process.pid,

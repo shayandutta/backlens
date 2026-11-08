@@ -65,18 +65,19 @@ Values that look like secrets are masked, `.env` files and `node_modules` are ne
 
 `backlens` starts the dashboard, then runs your command with `NODE_OPTIONS=--require backlens/register`. Inside your app, the register script:
 
-- times each incoming request on Node's own HTTP server, so it works with express, fastify, nest and plain `http`, and records requests the client cancels;
+- times each incoming request on Node's own HTTP server, so it works with express, fastify, nest, Next.js and plain `http`, and records requests the client cancels. Framework internals such as `/_next/` assets and favicons are skipped;
 - wraps `pg` (Client and Pool), `ioredis` and global `fetch`;
-- records where each call came from. For ORMs like drizzle, which call the driver from a microtask, the call site is read from V8's async stack once the query settles.
+- records where each call came from. For ORMs like drizzle, which call the driver from a microtask, the call site is read from V8's async stack once the query settles. Code run from bundled chunks (Next.js with Turbopack or webpack) is traced back to your source files through their source maps.
 
 Query values are never sent, only a short hash so identical questions can be told apart from different ones. Emails, IP addresses and ids in Redis keys are masked. The dashboard listens on 127.0.0.1 only and keeps the last 1000 requests in memory.
 
 ## Limits of this version
 
-- Node 20+. Requests, `pg` and `ioredis` are recorded in CommonJS and ESM apps (vitest included). The up-front route list needs fastify loaded through CommonJS, as nest does.
+- Tested on macOS with Node 20+, on a nest + fastify + drizzle app and a Next.js 16 + drizzle app. Linux should work the same way; Windows is untested.
+- Requests, `pg` and `ioredis` are recorded in CommonJS and ESM apps (vitest included). The up-front route list needs fastify loaded through CommonJS, as nest does.
 - `pg`, `ioredis` and `fetch` only. No Prisma, mysql or mongo yet.
 - The index advisor needs Postgres 16 or newer, and looks at equality filters only.
-- The "wait for each other" hint cannot see data dependencies, so read it as a question, not a verdict.
+- The "wait for each other" hint skips calls whose input matches an earlier call's output, but it cannot see every dependency (a value changed before use, an order that matters for side effects), so read it as a question, not a verdict.
 
 ## Develop
 
