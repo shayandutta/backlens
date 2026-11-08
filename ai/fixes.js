@@ -6,7 +6,8 @@ import { dirname, join, relative } from 'node:path';
 import { checkTrace } from '../analyze.js';
 import { ensureIgnore } from '../config.js';
 import { buildContext, insideProject } from './context.js';
-import { anthropicStatus, ask, issuePrompt, ollamaStatus } from './providers.js';
+import { looksLikeKey, removeKey, saveKey } from './credentials.js';
+import { anthropicStatus, ask, issuePrompt, LOCAL_MODELS, ollamaStatus, startPull, stopPull, testKey } from './providers.js';
 import { route } from './router.js';
 import { promiseAll } from './templates.js';
 
@@ -19,7 +20,7 @@ import { promiseAll } from './templates.js';
  */
 
 // Replaying a write sends it again, so it changes the dev database twice: reads only unless asked.
-const DEFAULTS = { provider: null, ollamaModel: 'qwen2.5-coder:3b', dailyBudgetUsd: 1, replay: true, replayWrites: false };
+const DEFAULTS = { provider: null, ollamaModel: null, dailyBudgetUsd: 1, replay: true, replayWrites: false };
 const EDIT_REPAIRS = 2;
 const TYPE_REPAIRS = 2;
 
@@ -70,10 +71,13 @@ export function createAI(deps) {
   } catch {}
 
   async function resolvedSettings() {
-    // Nothing is ever paid by default: the local model if it is installed, recorded answers otherwise.
-    if (settings.provider) return settings;
     const local = await ollamaStatus();
-    return { ...settings, provider: local.running && local.models.includes(settings.ollamaModel) ? 'ollama' : 'mock' };
+    // No model picked yet: one already downloaded if there is one, else the size this machine suits.
+    const ollamaModel =
+      settings.ollamaModel || LOCAL_MODELS.map((m) => m.name).find((n) => local.models.includes(n)) || local.models.find((n) => /coder/.test(n)) || local.recommended;
+    // Nothing is ever paid by default: the local model if it is ready, recorded answers otherwise.
+    const provider = settings.provider || (local.running && local.models.includes(ollamaModel) ? 'ollama' : 'mock');
+    return { ...settings, ollamaModel, provider };
   }
 
   function spentToday() {
@@ -85,7 +89,7 @@ export function createAI(deps) {
 
   async function status() {
     const s = await resolvedSettings();
-    return { settings: s, ollama: await ollamaStatus(), anthropic: anthropicStatus(), spentTodayUsd: spentToday(), history: readLines(historyFile).length };
+    return { settings: s, configured: Boolean(settings.provider), ollama: await ollamaStatus(), anthropic: anthropicStatus(), spentTodayUsd: spentToday(), history: readLines(historyFile).length };
   }
 
   function saveSettings(next) {
@@ -612,5 +616,30 @@ export function createAI(deps) {
     if (waiter) waiter(trace);
   }
 
-  return { status, saveSettings, explain, startFix, getFix, send, apply, keep, revert, escalate, stop, onReplayTrace, replayEnabled: () => settings.replay };
+  /** Tests a pasted key (free) and saves it only if Claude accepts it. */
+  async function setKey(key) {
+    key = typeof key === 'string' ? key.trim() : '';
+    if (!looksLikeKey(key)) throw new Error('That does not look like a Claude API key. It starts with sk-ant-.');
+    const problem = await testKey(key);
+    if (problem) throw new Error(problem);
+    saveKey(key);
+    return status();
+  }
+
+  async function forgetKey() {
+    removeKey();
+    return status();
+  }
+
+  async function pullModel(model) {
+    startPull(model);
+    return status();
+  }
+
+  async function stopPullModel() {
+    stopPull();
+    return status();
+  }
+
+  return { setKey, forgetKey, pullModel, stopPullModel, status, saveSettings, explain, startFix, getFix, send, apply, keep, revert, escalate, stop, onReplayTrace, replayEnabled: () => settings.replay };
 }

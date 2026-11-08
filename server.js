@@ -306,6 +306,10 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
         const p = url.pathname;
         if (req.method === 'GET' && p === '/api/ai/status') return json(res, 200, await ai.status());
         if (req.method === 'POST' && p === '/api/ai/settings') return json(res, 200, { settings: ai.saveSettings(body) });
+        if (req.method === 'POST' && p === '/api/ai/key') return json(res, 200, await ai.setKey(body.key));
+        if (req.method === 'POST' && p === '/api/ai/key/remove') return json(res, 200, await ai.forgetKey());
+        if (req.method === 'POST' && p === '/api/ai/ollama/pull') return json(res, 200, await ai.pullModel(body.model));
+        if (req.method === 'POST' && p === '/api/ai/ollama/stop') return json(res, 200, await ai.stopPullModel());
         if (req.method === 'POST' && p === '/api/ai/explain') return json(res, 200, await ai.explain(body.key));
         if (req.method === 'POST' && p === '/api/ai/fix') return json(res, 200, await ai.startFix(body.key));
         const m = p.match(/^\/api\/ai\/fix\/([0-9a-f-]{36})(?:\/(send|apply|keep|revert|escalate|stop))?$/);

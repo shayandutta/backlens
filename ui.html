@@ -152,6 +152,12 @@
   .conf.high { background: #12301f; color: #8de0b0; } .conf.medium { background: var(--warn-bg); color: var(--warn); } .conf.low { background: #3a1a1c; color: #f3a6a6; }
   .opt-card { display: block; border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; cursor: pointer; }
   .opt-card:has(input:checked) { border-color: var(--accent); background: #ffffff05; }
+  .opt-card { cursor: default; } .opt-card > label { cursor: pointer; }
+  .opt-card a { color: var(--accent); }
+  .opt-card .btn { text-decoration: none; display: inline-block; }
+  .field input[type=password] { flex: 1; font: 13px var(--mono); color: var(--text); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 8px; }
+  .progress { height: 6px; border-radius: 3px; background: var(--raise); overflow: hidden; margin: 10px 0 0; }
+  .progress > div { height: 100%; background: var(--accent); transition: width .4s; }
   .opt-card b { font-size: 13px; } .opt-card small { display: block; color: var(--sub); font-size: 12px; margin-top: 4px; }
   .field { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; color: var(--sub); }
   .field input[type=number], .field select { font: 13px var(--mono); color: var(--text); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 5px 8px; }
@@ -423,6 +429,11 @@ function renderSetup() {
       <div class="hintline">A script that rebuilds on change (like dev or start:dev) means you never press restart.</div></fieldset>
     <fieldset><legend>Run the tests with</legend>${group(scripts, isTest, (n, c) => opt('test', n, c, n === guessTest), guessTest)}${opt('test', '', 'no tests', !guessTest)}</fieldset>
     <label class="toggle" style="margin-bottom:20px"><input type="checkbox" name="auto" ${current.autoRestart ? 'checked' : ''} /> restart the app when a file changes (for scripts that do not watch)</label>
+    ${cfg.needsSetup ? `<fieldset><legend>Explain and fix issues with</legend>
+      <label class="opt"><input type="radio" name="ai" value="ollama" checked /><span>Local model</span><code>free, private, runs on this computer</code></label>
+      <label class="opt"><input type="radio" name="ai" value="anthropic" /><span>Claude</span><code>your own API key, strongest fixes</code></label>
+      <label class="opt"><input type="radio" name="ai" value="" /><span>Later</span><code>change it any time in AI settings</code></label>
+      <div class="hintline">The next screen walks you through it. Nothing is downloaded or paid without a click.</div></fieldset>` : ''}
     <div class="row-actions"><button class="primary" type="submit">${cfg.needsSetup ? 'Start app' : 'Save and restart'}</button>${!cfg.needsSetup ? '<button class="ghost" type="button" id="setup-cancel">Cancel</button>' : ''}<span class="error" role="alert">${esc(setupError)}</span></div>
   </form>`;
 }
@@ -753,25 +764,105 @@ async function pollFix() {
 }
 setInterval(pollFix, 600);
 
+let aiNotice = '';
+const gb = (n) => `${n.toFixed(1)} GB`;
+
+/** The local model card's body: install, open, download, then ready. Polled while the panel is open. */
+function localBody(o, s) {
+  if (!o.running && !o.installed) {
+    return `<small>Runs an AI model on this computer: free, and your code never leaves it. Install Ollama, open it, and this card updates by itself.</small>
+      <span class="field"><a class="btn primary" href="https://ollama.com/download" target="_blank" rel="noopener">Get Ollama</a><span class="muted">waiting for Ollama…</span></span>`;
+  }
+  if (!o.running) {
+    return `<small>Ollama is installed but not running. Open the Ollama app; this card updates by itself.</small>
+      <span class="field"><span class="muted">waiting for Ollama…</span></span>`;
+  }
+  const names = [...new Set([...o.catalog.map((m) => m.name), ...o.models])];
+  const info = (n) => o.catalog.find((m) => m.name === n);
+  const label = (n) => {
+    const m = info(n);
+    const have = o.models.includes(n);
+    return `${n}${n === o.recommended ? ' (best for this computer)' : ''}${have ? ' · downloaded' : m ? ` · ${gb(m.sizeGb)} download` : ''}`;
+  };
+  const chosen = s.ollamaModel;
+  const ready = o.models.includes(chosen);
+  const pull = o.pull && o.pull.model === chosen ? o.pull : null;
+  let action = '';
+  if (pull && !pull.done) {
+    const pct = pull.total ? Math.floor((pull.completed / pull.total) * 100) : 0;
+    action = `<div class="progress"><div style="width:${pct}%"></div></div>
+      <span class="field"><span class="muted">${pull.total ? `${pct}% of ${gb(pull.total / 1024 ** 3)}` : esc(pull.status)}</span><button class="ghost" type="button" id="ai-pull-stop">Stop</button></span>`;
+  } else if (!ready) {
+    const m = info(chosen);
+    action = `<span class="field"><button class="primary" type="button" id="ai-pull" data-model="${esc(chosen)}">Download ${esc(chosen)}${m ? ` (${gb(m.sizeGb)})` : ''}</button>
+      ${pull && pull.error ? `<span class="error">${esc(pull.error)}</span>` : ''}</span>`;
+  }
+  const note = info(chosen) ? `<small>${esc(chosen)} ${esc(info(chosen).note)} This computer has ${o.ramGb} GB of memory.</small>` : '';
+  return `<small>${ready ? 'Ready. Code never leaves this machine.' : 'Ollama is running. Download a model to use it.'}</small>
+    <span class="field">model <select name="ollamaModel">${names.map((n) => `<option value="${esc(n)}" ${n === chosen ? 'selected' : ''}>${esc(label(n))}</option>`).join('')}</select></span>
+    ${action}${note}`;
+}
+
+function claudeBody(a, s) {
+  const keyLine = a.configured
+    ? `<span class="field"><span>Using the key ending in <code>${esc(a.last4 || '…')}</code>, ${a.source === 'env' ? 'from ANTHROPIC_API_KEY' : a.source === 'saved' ? 'saved on this computer' : 'from your environment'}.</span>${a.source === 'saved' ? '<button class="ghost" type="button" id="ai-key-remove">Remove</button>' : ''}</span>`
+    : `<span class="field"><input type="password" id="ai-key" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" /><button class="primary" type="button" id="ai-key-save">Check and save</button></span>
+       <small>Create one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>. Checking it is free. It is saved in your user folder (~/.config/backlens), never in this project, and never shown again.</small>`;
+  return `<small>The strongest fixes. backlens picks Haiku, Sonnet or Opus per issue and shows the cost before sending.</small>
+    ${keyLine}
+    <span class="field">daily budget $ <input type="number" name="dailyBudgetUsd" min="0" step="0.5" value="${s.dailyBudgetUsd}" /> <span>spent today ${usd(aiStatus.spentTodayUsd)}</span></span>`;
+}
+
 async function renderAISettings() {
   const el = $('#aiset');
   try { aiStatus = await (await api('/api/ai/status')).json(); } catch { el.innerHTML = '<p class="error">Could not load AI settings.</p>'; return; }
   const s = aiStatus.settings, o = aiStatus.ollama, a = aiStatus.anthropic;
-  const models = o.models.length ? o.models : [s.ollamaModel];
-  el.innerHTML = `<button class="ghost close" type="button" id="aiset-close">Close</button><h2>AI settings</h2><p class="muted" style="font-size:13px">Who explains issues and suggests fixes. Saved in .backlens/ai.json.</p>
+  el.innerHTML = `<button class="ghost close" type="button" id="aiset-close">Close</button><h2>AI settings</h2><p class="muted" style="font-size:13px">Who explains issues and suggests fixes. Changes save as you make them.</p>
+    <p class="muted" style="font-size:12px">Some fixes never need a model: running independent calls together (Promise.all) and missing indexes are written by backlens itself.</p>
     <form id="aiset-form"><section>
-      <label class="opt-card"><input type="radio" name="provider" value="ollama" ${s.provider === 'ollama' ? 'checked' : ''}/> <b>Local model</b> <span class="chip">free</span> <span class="chip">private</span>
-        <small>${o.running ? `Ollama is running. Code never leaves this machine.` : 'Ollama is not running. Install it from ollama.com, or brew install ollama, then brew services start ollama.'}</small>
-        <span class="field">model <select name="ollamaModel">${models.map((m) => `<option ${m === s.ollamaModel ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></span></label>
-      <label class="opt-card"><input type="radio" name="provider" value="mock" ${s.provider === 'mock' ? 'checked' : ''}/> <b>Recorded answers</b> <span class="chip">free</span>
-        <small>No model at all. Explain uses backlens's own words; fixes come from .backlens/ai-fixtures.json. For trying the flow.</small></label>
-      <label class="opt-card"><input type="radio" name="provider" value="anthropic" ${s.provider === 'anthropic' ? 'checked' : ''}/> <b>Claude, with your own key</b> <span class="chip">paid by you</span>
-        <small>${a.configured ? `Key found in ${esc(a.source)}.` : `No key found. Set ANTHROPIC_API_KEY before starting backlens, or use ${esc(a.source)}.`} backlens picks Haiku, Sonnet or Opus per issue and shows the cost before sending.</small>
-        <span class="field">daily budget $ <input type="number" name="dailyBudgetUsd" min="0" step="0.5" value="${s.dailyBudgetUsd}" /> <span>spent today ${usd(aiStatus.spentTodayUsd)}</span></span></label>
+      <div class="opt-card ${s.provider === 'ollama' ? 'on' : ''}"><label><input type="radio" name="provider" value="ollama" ${s.provider === 'ollama' ? 'checked' : ''}/> <b>Local model</b> <span class="chip">free</span> <span class="chip">private</span></label>
+        <div id="ai-local">${localBody(o, s)}</div></div>
+      <div class="opt-card ${s.provider === 'anthropic' ? 'on' : ''}"><label><input type="radio" name="provider" value="anthropic" ${s.provider === 'anthropic' ? 'checked' : ''}/> <b>Claude, with your own key</b> <span class="chip">paid by you</span></label>
+        <div id="ai-claude">${claudeBody(a, s)}</div></div>
+      <div class="opt-card ${s.provider === 'mock' ? 'on' : ''}"><label><input type="radio" name="provider" value="mock" ${s.provider === 'mock' ? 'checked' : ''}/> <b>No model</b> <span class="chip">free</span></label>
+        <small>Explanations in backlens's own words. Fixes only where backlens can write them itself.</small></div>
     </section>
     <label class="toggle" style="margin:6px 0 6px"><input type="checkbox" name="replay" ${s.replay ? 'checked' : ''}/> keep recent requests in memory so a fix can be replayed (never written to disk, never sent to a model)</label>
     <label class="toggle" style="margin:0 0 16px"><input type="checkbox" name="replayWrites" ${s.replayWrites ? 'checked' : ''}/> also replay requests that change data (POST, PUT, DELETE): they run again against your dev database</label>
-    <div class="actions"><button class="primary" type="submit">Save</button><span class="muted" style="font-size:12px;align-self:center">${aiStatus.history} fix${aiStatus.history === 1 ? '' : 'es'} in local history</span></div></form>`;
+    <div class="actions"><span class="${aiNotice.startsWith('!') ? 'error' : 'muted'}" role="status" style="font-size:12px;align-self:center">${esc(aiNotice.replace(/^!/, ''))}</span><span class="muted" style="font-size:12px;align-self:center;margin-left:auto">${aiStatus.history} fix${aiStatus.history === 1 ? '' : 'es'} in local history</span></div></form>`;
+}
+
+// While the panel is open, follow Ollama starting and model downloads without redrawing the key box.
+setInterval(async () => {
+  if ($('#aiset').hidden || !aiStatus) return;
+  const o = aiStatus.ollama;
+  const waiting = !o.running || (o.pull && !o.pull.done) || !o.models.includes(aiStatus.settings.ollamaModel);
+  if (!waiting) return;
+  try {
+    const next = await (await api('/api/ai/status')).json();
+    const finished = o.pull && !o.pull.done && next.ollama.pull && next.ollama.pull.done;
+    aiStatus = next;
+    if (finished) { aiNotice = next.ollama.pull.error ? '!' + next.ollama.pull.error : `${next.ollama.pull.model} downloaded.`; return renderAISettings(); }
+    const box = $('#ai-local');
+    if (box && !box.contains(document.activeElement)) box.innerHTML = localBody(next.ollama, next.settings);
+  } catch {}
+}, 1500);
+
+async function saveAISettings() {
+  const f = new FormData($('#aiset-form'));
+  try {
+    await aiPost('/api/ai/settings', { provider: f.get('provider'), ollamaModel: f.get('ollamaModel') || aiStatus.settings.ollamaModel, dailyBudgetUsd: f.get('dailyBudgetUsd'), replay: f.get('replay') === 'on', replayWrites: f.get('replayWrites') === 'on' });
+    aiNotice = 'Saved.';
+  } catch (err) { aiNotice = '!' + err.message; }
+  renderAISettings();
+}
+document.addEventListener('change', (e) => { if (e.target.closest('#aiset-form') && e.target.id !== 'ai-key') saveAISettings(); });
+
+async function aiAction(button, path, body, done) {
+  button.disabled = true;
+  aiNotice = '';
+  try { await aiPost(path, body); aiNotice = done; } catch (err) { aiNotice = '!' + err.message; }
+  renderAISettings();
 }
 
 document.addEventListener('click', async (e) => {
@@ -807,15 +898,20 @@ document.addEventListener('click', async (e) => {
     if (action === 'keep' || action === 'revert') { lastTotal = -1; poll(); }
     return;
   }
-  if (e.target.closest('#ai-open')) { $('#aiset').hidden = false; renderAISettings(); return; }
+  if (e.target.closest('#ai-pull')) { const b = e.target.closest('#ai-pull'); return aiAction(b, '/api/ai/ollama/pull', { model: b.dataset.model }, ''); }
+  if (e.target.closest('#ai-pull-stop')) return aiAction(e.target.closest('#ai-pull-stop'), '/api/ai/ollama/stop', {}, '');
+  if (e.target.closest('#ai-key-save')) {
+    const input = $('#ai-key');
+    const key = input.value.trim();
+    input.value = '';
+    if (!key) { aiNotice = '!Paste a key first.'; return renderAISettings(); }
+    aiNotice = 'Checking the key…';
+    $('#ai-key-save').textContent = 'Checking…';
+    return aiAction(e.target.closest('#ai-key-save'), '/api/ai/key', { key }, 'Key works and is saved. Pick Claude above to use it.');
+  }
+  if (e.target.closest('#ai-key-remove')) return aiAction(e.target.closest('#ai-key-remove'), '/api/ai/key/remove', {}, 'Key removed from this computer.');
+  if (e.target.closest('#ai-open')) { aiNotice = ''; $('#aiset').hidden = false; renderAISettings(); return; }
   if (e.target.closest('#aiset-close')) { $('#aiset').hidden = true; return; }
-});
-document.addEventListener('submit', async (e) => {
-  if (e.target.id !== 'aiset-form') return;
-  e.preventDefault();
-  const f = new FormData(e.target);
-  await aiPost('/api/ai/settings', { provider: f.get('provider'), ollamaModel: f.get('ollamaModel'), dailyBudgetUsd: f.get('dailyBudgetUsd'), replay: f.get('replay') === 'on', replayWrites: f.get('replayWrites') === 'on' });
-  renderAISettings();
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (!$('#aiset').hidden) $('#aiset').hidden = true; else if (fixJob && !['thinking', 'verifying', 'reverting'].includes(fixJob.stage)) { fixJob = null; renderFix(); } } });
 
@@ -955,10 +1051,27 @@ document.addEventListener('submit', async (e) => {
   const res = await api('/api/config', { method: 'POST', body: JSON.stringify({ app: f.get('app'), test: f.get('test') || null, autoRestart: f.get('auto') === 'on' }) });
   if (!res.ok) { setupError = (await res.json()).error || 'Could not save.'; render(); return; }
   showSetup = false;
+  const ai = f.get('ai');
+  if (ai) {
+    try { await aiPost('/api/ai/settings', { provider: ai }); } catch {}
+  }
   await loadConfig();
   testInfo = null;
   render();
   pollApp();
+  // Open the AI settings when the chosen helper still needs a step (Ollama, a model, a key).
+  if (ai) {
+    try {
+      const st = await (await api('/api/ai/status')).json();
+      const ready = ai === 'ollama' ? st.ollama.running && st.ollama.models.includes(st.settings.ollamaModel) : st.anthropic.configured;
+      if (!ready) { aiNotice = ''; $('#aiset').hidden = false; renderAISettings(); }
+    } catch {}
+  }
+});
+document.addEventListener('submit', (e) => {
+  if (e.target.id !== 'aiset-form') return;
+  e.preventDefault();
+  if (document.activeElement && document.activeElement.id === 'ai-key') $('#ai-key-save').click();
 });
 document.addEventListener('click', async (e) => {
   if (e.target.closest('#setup-open') || e.target.closest('#setup-open-2')) { showSetup = true; render(); return; }

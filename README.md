@@ -57,11 +57,13 @@ In the Compare tab, save a snapshot, change your code, restart, use the same pag
 
 Every issue has **Explain** and **Suggest fix**. A fix goes: a preview of exactly what would be sent and to whom, the model's answer as a diff, **Apply and check** (only on files with no uncommitted changes, with a backup), then backlens rebuilds if needed, restarts your app, replays the request that showed the issue and runs your tests. Only a fix that removes the issue and keeps the tests green is marked proven. Keep it, or revert to the exact files you had.
 
-Who answers is chosen per issue, with the reasons shown:
+Who answers is set up in **AI settings**, all from the dashboard. The first-run setup asks too.
 
-- **Local model** (free, private): any model in [Ollama](https://ollama.com). Picked by default when Ollama is running.
-- **Recorded answers** (free): no model; fixes come from `.backlens/ai-fixtures.json`. For trying the flow and for tests.
-- **Claude with your own key**: set `ANTHROPIC_API_KEY` before starting backlens. Explaining uses Claude Haiku 5.5; fixes use Sonnet 5.5 or Opus 5.5 depending on how hard the issue looks (files involved, issue type, test coverage, your past results), one step up after a failed check. Missing indexes never use a model. A daily budget (default $1) is enforced before sending.
+- **Local model** (free, private): runs on your computer through [Ollama](https://ollama.com). The card walks you through it: a link to install Ollama, then it notices when Ollama is running, suggests the model that fits your memory (`qwen2.5-coder` 3B for 8 GB, 7B for 16 GB, 14B for 32 GB) and downloads it with a progress bar. Small models explain well; their fixes are hit-and-miss, and every fix is checked anyway.
+- **Claude with your own key**: paste the key and backlens checks it for free before saving it in your user folder (`~/.config/backlens`, readable by you only), never in the project. `ANTHROPIC_API_KEY` in the environment wins if set. Explaining uses Claude Haiku 5.5; fixes use Sonnet 5.5 or Opus 5.5 depending on how hard the issue looks (files involved, issue type, test coverage, your past results), one step up after a failed check. A daily budget (default $1) is enforced before sending.
+- **No model**: explanations in backlens's own words.
+
+Some fixes never use a model: running independent calls together (`Promise.all`) and missing indexes are written by backlens itself, the same way every time.
 
 Values that look like secrets are masked, `.env` files and `node_modules` are never read, and requests kept for replay stay in memory only. Replaying a POST, PUT or DELETE runs it again against your dev database, so it is off unless you allow it in AI settings.
 
