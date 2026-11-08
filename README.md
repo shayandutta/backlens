@@ -12,6 +12,8 @@ npx backlens
 
 One command, in your server's folder. No code changes, no account, nothing leaves your machine.
 
+![backlens finding three issues in a NestJS API, fixing one with Promise.all and proving it with a replay, then creating a missing index](https://raw.githubusercontent.com/shayandutta/backlens/main/docs/demo.gif)
+
 ---
 
 ## What it does
