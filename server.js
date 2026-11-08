@@ -30,6 +30,8 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
   let config = manualArgv ? { app: null, test: null, autoRestart: false } : loadConfig(root);
 
   const traces = [];
+  // Issue key -> when its fix was kept (see summarize).
+  const fixedAt = new Map();
   let received = 0;
   const known = new Map();
   const advice = new Map();
@@ -207,15 +209,15 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
 
     // From the dashboard.
     if (req.method === 'GET' && url.pathname === '/api/state') {
-      const { routes, issues } = summarize(traces, [...known.keys()], [...advice.values()]);
+      const { routes, issues } = summarize(traces, [...known.keys()], [...advice.values()], fixedAt);
       const recent = traces
         .slice(-300)
         .reverse()
-        .map((t) => ({ id: t.id, at: t.at, method: t.method, url: t.url, route: routeOf(t.method, t.url, t.template), status: t.status, duration: t.duration, spans: t.spans.length, aborted: Boolean(t.aborted) }));
+        .map((t) => ({ id: t.id, at: t.at, method: t.method, url: t.url, route: routeOf(t.method, t.url, t.template), status: t.status, duration: t.duration, spans: t.spans.length, aborted: Boolean(t.aborted), afterFix: Boolean(t.afterFix) }));
       return json(res, 200, { routes, issues, recent, total: traces.length, received });
     }
     if (req.method === 'GET' && url.pathname === '/api/map') {
-      const { issues } = summarize(traces, [...known.keys()], [...advice.values()]);
+      const { issues } = summarize(traces, [...known.keys()], [...advice.values()], fixedAt);
       return json(res, 200, { ...mapOf(traces, issues), advice: [...advice.values()].map((a) => ({ table: a.table, columns: a.columns })) });
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/trace/')) {
@@ -228,12 +230,13 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
       traces.length = 0;
       received = 0;
       advice.clear();
+      fixedAt.clear();
       return json(res, 200, { ok: true });
     }
     if (req.method === 'POST' && url.pathname === '/api/snapshot') {
       const name = (url.searchParams.get('name') || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
       if (!name) return json(res, 400, { error: 'Give the snapshot a name.' });
-      const { routes, issues } = summarize(traces, [...known.keys()], [...advice.values()]);
+      const { routes, issues } = summarize(traces, [...known.keys()], [...advice.values()], fixedAt);
       mkdirSync(snapshotDir, { recursive: true });
       writeFileSync(join(snapshotDir, `${name}.json`), `${JSON.stringify({ name, at: Date.now(), requests: traces.length, routes: routes.filter((r) => r.calls), issues: issues.length }, null, 2)}\n`);
       return json(res, 200, { ok: true, name });
@@ -360,10 +363,19 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
         pauseWatch: (on) => (watchPaused = on),
         testsTail: () => tests.lines.slice(-14).map((l) => l.text).join('\n'),
         getIssue: (key) => {
-          const { issues } = summarize(traces, [...known.keys()], [...advice.values()]);
+          const { issues } = summarize(traces, [...known.keys()], [...advice.values()], fixedAt);
           return issues.find((i) => i.key === key) || (testRun.report ? testRun.report.issues.find((i) => i.key === key) : null);
         },
         getTrace: (id) => traces.find((t) => t.id === id) || testRun.traces.find((t) => t.id === id),
+        markFixed: (key, after) => {
+          fixedAt.set(key, Date.now());
+          if (after) {
+            const { replayOf, ...trace } = after;
+            traces.push({ ...trace, afterFix: true });
+            received++;
+            if (traces.length > KEEP) replays.delete(traces.shift().id);
+          }
+        },
         getReplay: (id) => replays.get(id),
         restartApp: async () => {
           app.port = null;

@@ -160,3 +160,15 @@ test('a wrapper line many statements pass through is skipped in locations', () =
   const n1 = issues.find((i) => i.type === 'n-plus-one');
   assert.deepEqual(n1.sites, ['src/r.ts:47']);
 });
+
+test('a kept fix hides its issue until a later request shows it again', () => {
+  const repeated = (at) => ({ ...trace([db('select 1 from t where id = $1', 0, 1, 'a', 'f', 1), db('select 1 from t where id = $1', 3, 1, 'a', 'g', 2)]), at });
+  const before = repeated(1000);
+  const key = summarize([before]).issues[0].key;
+  const fixed = new Map([[key, 2000]]);
+  const hidden = summarize([before, { ...trace([]), at: 1500 }], [], [], fixed);
+  assert.equal(hidden.issues.length, 0);
+  assert.equal(hidden.routes[0].issues, 0);
+  const back = summarize([before, repeated(3000)], [], [], fixed);
+  assert.equal(back.issues.length, 1);
+});

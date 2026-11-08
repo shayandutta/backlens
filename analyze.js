@@ -236,7 +236,11 @@ function percentile(values, p) {
 }
 
 /** Routes and issues across every trace kept. */
-export function summarize(traces, known = [], advice = []) {
+/**
+ * fixed: issue key -> when a fix for it was kept. Such an issue is hidden until a request after
+ * that moment shows it again.
+ */
+export function summarize(traces, known = [], advice = [], fixed = new Map()) {
   const routes = new Map();
   const issues = new Map();
   for (const trace of traces) {
@@ -259,6 +263,7 @@ export function summarize(traces, known = [], advice = []) {
       agg.seen++;
       agg.costTotal += issue.cost;
       agg.example = trace.id;
+      agg.lastAt = Math.max(agg.lastAt || 0, trace.at || 0);
     }
   }
   // Index advice: one issue per route that ran the query. Its location skips wrapper lines that
@@ -281,8 +286,9 @@ export function summarize(traces, known = [], advice = []) {
       const span = trace.spans.find((s) => s.kind === 'db' && normalizeSql(s.name) === sql);
       if (!span) continue;
       const route = routeOf(trace.method, trace.url, trace.template);
-      if (!perRoute.has(route)) perRoute.set(route, { seen: 0, example: trace.id, span });
+      if (!perRoute.has(route)) perRoute.set(route, { seen: 0, example: trace.id, span, lastAt: 0 });
       perRoute.get(route).seen++;
+      perRoute.get(route).lastAt = Math.max(perRoute.get(route).lastAt, trace.at || 0);
     }
     const big = a.rows >= 1000;
     const name = `${a.table}_${a.columns.join('_')}_idx`.slice(0, 63);
@@ -302,6 +308,7 @@ export function summarize(traces, known = [], advice = []) {
         route,
         seen: info.seen,
         example: info.example,
+        lastAt: info.lastAt,
         costTotal: 0,
       });
     }
@@ -310,6 +317,12 @@ export function summarize(traces, known = [], advice = []) {
   // Routes the app registered but nobody has called yet.
   for (const route of known) {
     if (!routes.has(route)) routes.set(route, { route, calls: 0, durations: [], queries: 0, redis: 0, http: 0, errors: 0, issueKeys: new Set(), last: 0 });
+  }
+  for (const [key, issue] of issues) {
+    if (fixed.has(key) && fixed.get(key) >= (issue.lastAt || 0)) {
+      issues.delete(key);
+      routes.get(issue.route)?.issueKeys.delete(key);
+    }
   }
   const routeList = [...routes.values()]
     .map((r) => ({

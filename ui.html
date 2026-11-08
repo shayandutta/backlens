@@ -155,6 +155,14 @@
   .opt-card { cursor: default; } .opt-card > label { cursor: pointer; }
   .opt-card a { color: var(--accent); }
   a.btn { text-decoration: none; display: inline-block; }
+  .compare-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 4px 0 14px; }
+  .compare-card h4 { margin: 0 0 8px; font-size: 13px; }
+  .compare-card table { width: auto; border-collapse: collapse; font: 13px var(--mono); }
+  .compare-card th { text-align: left; font-weight: 400; color: var(--sub); padding: 3px 18px 3px 0; }
+  .compare-card td { padding: 3px 10px 3px 0; }
+  .compare-card .arrow { color: var(--sub); }
+  .compare-card .better { color: #4ade80; } .compare-card .worse { color: #f87171; } .compare-card .same { color: var(--text); }
+  .compare-card .delta { font-size: 12px; }
   .field input[type=password] { flex: 1; font: 13px var(--mono); color: var(--text); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 8px; }
   .progress { height: 6px; border-radius: 3px; background: var(--raise); overflow: hidden; margin: 10px 0 0; }
   .progress > div { height: 100%; background: var(--accent); transition: width .4s; }
@@ -363,7 +371,7 @@ function renderRequests() {
   return `<h2>${routeFilter ? `<button class="ghost" type="button" id="unfilter">${esc(routeFilter)} ✕</button>` : `latest ${list.length} requests`}</h2><table>
     <thead><tr><th>when</th><th>request</th><th class="n">status</th><th class="n">time</th><th class="n hide-sm">calls</th></tr></thead>
     <tbody>${list.map((t) => `<tr data-trace="${esc(t.id)}" class="${openTrace && openTrace.trace.id === t.id ? 'sel' : ''}">
-      <td class="muted">${ago(t.at)}</td><td><span class="method">${esc(t.method)}</span><span class="route">${esc(t.url)}</span></td>
+      <td class="muted">${ago(t.at)}</td><td><span class="method">${esc(t.method)}</span><span class="route">${esc(t.url)}</span>${t.afterFix ? ' <span class="chip live">after fix</span>' : ''}</td>
       <td class="n ${statusClass(t.status)}">${t.aborted ? 'cancelled' : t.status}</td><td class="n">${ms(t.duration)}</td><td class="n hide-sm muted">${t.spans}</td></tr>`).join('')}</tbody></table>`;
 }
 
@@ -740,6 +748,7 @@ function renderFix() {
     el.innerHTML = html; return;
   }
   html += `<ol class="feed">${j.events.map(feedItem).join('')}${j.stage === 'error' ? `<li class="fi"><span class="dot bad">●</span><div class="verdict bad">${esc(j.error)}</div></li>` : ''}</ol>`;
+  html += compareCard(j);
   const act = [];
   if (j.stage === 'proposed') act.push('<button class="primary" type="button" id="fix-apply">Apply and check</button><button class="ghost" type="button" id="fix-close-2">Discard</button>');
   if (j.stage === 'no-edits') act.push(`<span class="note">No change was applied.</span>${escalateBtn(j)}`);
@@ -752,6 +761,27 @@ function renderFix() {
   el.innerHTML = html;
   el.querySelectorAll('[data-autoscroll]').forEach((t) => (t.scrollTop = t.scrollHeight));
   el.scrollTop = atBottom || busy ? el.scrollHeight : keepScroll;
+}
+
+/** The same request before and after the change, side by side. */
+function compareCard(j) {
+  const c = j.compare;
+  if (!c || !c.before || !['verified', 'failed', 'unverified', 'kept', 'reverted'].includes(j.stage)) return '';
+  const pct = (a, b) => (a ? Math.round(((b - a) / a) * 100) : 0);
+  const row = (label, a, b, fmt = (x) => x, lowerIsBetter = true) => {
+    const d = pct(a, b);
+    const tone = a === b ? 'same' : (b < a) === lowerIsBetter ? 'better' : 'worse';
+    return `<tr><th>${label}</th><td>${fmt(a)}</td><td class="arrow">→</td><td class="${tone}">${fmt(b)}</td><td class="${tone} delta">${a === b ? '' : `${d > 0 ? '+' : ''}${d}%`}</td></tr>`;
+  };
+  const kind = esc((j.issueTitle || '').split(':')[0]);
+  return `<section class="compare-card"><h4>Same request, before and after the change</h4><table>
+    ${row('time', c.before.ms, c.after.ms, (x) => ms(x))}
+    ${row('database queries', c.before.queries, c.after.queries)}
+    ${c.before.redis || c.after.redis ? row('redis calls', c.before.redis, c.after.redis) : ''}
+    ${c.before.http || c.after.http ? row('outgoing http', c.before.http, c.after.http) : ''}
+    <tr><th>status</th><td>${c.before.status}</td><td class="arrow">→</td><td class="${c.before.status === c.after.status ? 'same' : 'worse'}">${c.after.status}</td><td></td></tr>
+    <tr><th>issue</th><td>${kind || 'found'}</td><td class="arrow">→</td><td class="${c.issueGone ? 'better' : 'worse'}">${c.issueGone ? 'gone' : 'still there'}</td><td></td></tr>
+  </table><p class="note">One request each${c.warmed ? ', the after one measured once the restarted app was warm' : ''}. Query counts are exact; times vary a few ms from run to run.</p></section>`;
 }
 
 function escalateBtn(j) {

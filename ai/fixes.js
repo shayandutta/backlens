@@ -139,7 +139,7 @@ export function createAI(deps) {
   }
 
   const view = (job) => {
-    const { ctx, issue, backups, convo, abort, ...rest } = job;
+    const { ctx, issue, backups, convo, abort, afterTrace, ...rest } = job;
     return { ...rest, now: Date.now(), issueTitle: issue.title, issueRoute: issue.route, spentTodayUsd: spentToday(), budgetUsd: settings.dailyBudgetUsd };
   };
 
@@ -469,6 +469,12 @@ export function createAI(deps) {
     return { ok: r.code === 0, errors: r.out };
   }
 
+  /** What a request cost: the numbers shown before and after a fix. */
+  function stats(trace) {
+    const count = (kind) => trace.spans.filter((x) => x.kind === kind).length;
+    return { status: trace.status, ms: trace.duration, queries: count('db'), redis: count('redis'), http: count('http') };
+  }
+
   function replay(job, payload, port) {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
@@ -533,6 +539,9 @@ export function createAI(deps) {
       r.status = 'skip';
       r.detail = settings.replay ? 'the request that showed this issue is no longer in memory; use the page again to record a fresh one' : 'replay is off in AI settings';
     } else {
+      // The app has just restarted, so its first request pays for cold caches and new connections.
+      // A read is sent once to warm up, and the second one is measured.
+      if (!isWrite) await replay(job, payload, deps.appPort());
       const trace = await replay(job, payload, deps.appPort());
       if (!trace) {
         r.status = 'fail';
@@ -545,6 +554,8 @@ export function createAI(deps) {
       const before = original ? `${original.status} in ${original.duration} ms, ${original.spans.length} calls` : '';
       r.status = !still && sameClass ? 'done' : 'fail';
       r.detail = `before: ${before}\nafter:  ${trace.status} in ${trace.duration} ms, ${trace.spans.length} calls${still ? ', issue still there' : ', issue gone'}`;
+      job.compare = { before: original ? stats(original) : null, after: stats(trace), issueGone: !still, warmed: !isWrite };
+      job.afterTrace = trace;
       if (trace.status === 401 && original && original.status !== 401) r.detail += '\nThe recorded login may have expired: sign in again and use the page once more.';
       if (r.status === 'fail') return finish(job, false, still ? 'The issue is still there after the change.' : `The request now answers ${trace.status}.`);
     }
@@ -586,6 +597,8 @@ export function createAI(deps) {
     append(historyFile, { at: new Date().toISOString(), type: job.issue.type, tier: job.route.tier || job.route.kind, model: job.route.model, verified: Boolean(job.verified), kept: true });
     cleanup(job);
     job.stage = 'kept';
+    // The measured request joins the normal list, and the issue leaves it until a request shows it again.
+    if (deps.markFixed) deps.markFixed(job.issue.key, job.afterTrace && job.compare && job.compare.issueGone ? job.afterTrace : null);
     ev(job, 'done', 'Kept. Review it in your editor and commit when ready.');
     return view(job);
   }
