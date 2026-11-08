@@ -47,7 +47,9 @@ backlens: 2 new issues. Fix them, or accept with --update-baseline.
 
 ## Missing indexes
 
-For each distinct SELECT, backlens asks Postgres for its plan with `EXPLAIN (GENERIC_PLAN)` (Postgres 16+). Plain EXPLAIN never runs the query, and the generic plan needs no parameter values. When a table is read row by row while filtering on columns that no index starts with, the Issues tab names the table and columns and gives the `CREATE INDEX` to add. It checks whether an index exists, not how fast the query was, so it is right on a small dev database too.
+For each distinct SELECT, backlens asks Postgres for its plan with `EXPLAIN (GENERIC_PLAN)` (Postgres 16+). Plain EXPLAIN never runs the query, and the generic plan needs no parameter values. When a table is read row by row while filtering on columns that no index starts with, the Issues tab names the table and columns and gives the `CREATE INDEX` to add. It checks whether an index exists, not how fast the query was, so it is right on a small dev database too. When the query also sorts (`ORDER BY … LIMIT`), the sort columns go after the filter columns, so Postgres reads rows already in order.
+
+**Create on this database** builds the index on the database your app is connected to, through the app's own connection: backlens never sees a database password. It shows which database first, builds with `CONCURRENTLY` so writes are not blocked, checks that Postgres can use the index for the query, and **Undo** drops it again. Only an index on the columns backlens checked can be created this way, never arbitrary SQL. Use it on a development database, then add the SQL to a migration.
 
 ## Before and after
 

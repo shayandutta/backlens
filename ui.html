@@ -735,9 +735,10 @@ function renderFix() {
     <div class="kicker2">fix${j.attempt ? ', second attempt' : ''}</div><h2>${esc(j.issueTitle)}</h2><div class="meta">${esc(j.issueRoute || '')}</div>
     <div class="chips" style="margin-top:10px"><span class="chip">${esc(r.label)}</span><span class="chip">${r.kind === 'anthropic' ? (j.costUsd ? `spent ${usd(j.costUsd)}` : `about ${usd(r.estimateUsd)}`) : 'free'}</span>${busy ? '<span class="chip live"><span class="spin"></span> working</span>' : ''}</div></div>`;
   if (j.stage === 'template') {
-    html += `<ol class="feed"><li class="fi">${'<span class="dot ok">●</span>'}<div><div class="bubble">${esc(j.explanation)}</div></div></li></ol><div class="editor"><div class="editor-head"><span class="dots"><i></i><i></i><i></i></span>migration</div><div class="editor-body"><div class="cl add"><span class="ln">1</span><span class="mk">+</span><span class="cx">${hl(j.sql)}</span></div></div></div><p class="note">${esc(j.notes)}</p>
-      <div class="fix-actions"><button class="primary" type="button" data-copy="${esc(j.sql)}">Copy SQL</button></div>`;
-    el.innerHTML = html; return;
+    html += `<ol class="feed"><li class="fi">${'<span class="dot ok">●</span>'}<div><div class="bubble">${esc(j.explanation)}</div></div></li></ol><div class="editor"><div class="editor-head"><span class="dots"><i></i><i></i><i></i></span>migration</div><div class="editor-body"><div class="cl add"><span class="ln">1</span><span class="mk">+</span><span class="cx">${hl(j.sql)}</span></div></div></div><p class="note">${esc(j.notes)}</p>${indexPanel(j)}`;
+    el.innerHTML = html;
+    if (!idx.db && !idx.loading) loadIndexInfo();
+    return;
   }
   if (j.stage === 'preview') {
     html += `<section class="plan"><h4>Why this model</h4><ul class="reasons">${r.reasons.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
@@ -783,6 +784,46 @@ function compareCard(j) {
     <tr><th>issue</th><td>${kind || 'found'}</td><td class="arrow">→</td><td class="${c.issueGone ? 'better' : 'worse'}">${c.issueGone ? 'gone' : 'still there'}</td><td></td></tr>
   </table><p class="note">One request each${c.warmed ? ', the after one measured once the restarted app was warm' : ''}. Query counts are exact; times vary a few ms from run to run.</p></section>`;
 }
+
+// ---- creating a suggested index from the drawer ----------------------------------------
+let idx = {};
+async function loadIndexInfo() {
+  idx.loading = true;
+  try { idx.db = await aiPost('/api/index/info', {}); } catch (err) { idx.dbError = err.message; }
+  idx.loading = false;
+  renderFix();
+}
+
+function indexPanel(j) {
+  const where = idx.db ? `<b>${esc(idx.db.database)}</b> on ${esc(idx.db.host)}${idx.db.port ? `:${idx.db.port}` : ''}` : idx.dbError ? '' : 'checking…';
+  const steps = [];
+  if (idx.result && idx.result.created) {
+    steps.push(`<li class="fi"><span class="dot ok">●</span><div><div class="fh"><b>Created</b> ${esc(idx.result.index.name)}</div><div class="sub2">on ${where}, built without blocking writes</div></div></li>`);
+    const u = idx.result.usable;
+    steps.push(`<li class="fi"><span class="dot ${u ? 'ok' : u === false ? 'bad' : 'skip'}">●</span><div><div class="fh"><b>Plan check</b></div><div class="sub2">${u ? 'Postgres can answer this query from the new index.' : u === false ? 'Postgres would still not use it for this query.' : 'Could not check the plan for this query.'}</div></div></li>`);
+  }
+  if (idx.dropped) steps.push(`<li class="fi"><span class="dot skip">●</span><div><div class="fh"><b>Dropped</b> the index again</div></div></li>`);
+  const actions = idx.result && idx.result.created
+    ? `<button class="ghost" type="button" id="idx-drop" ${idx.busy ? 'disabled' : ''}>Undo (drop it)</button><button class="ghost" type="button" data-copy="${esc(j.sql)}">Copy SQL for a migration</button>`
+    : `<button class="primary" type="button" id="idx-create" ${idx.busy || !idx.db ? 'disabled' : ''}>${idx.busy ? 'Creating…' : 'Create on this database'}</button><button class="ghost" type="button" data-copy="${esc(j.sql)}">Copy SQL</button>`;
+  return `${steps.length ? `<ol class="feed">${steps.join('')}</ol>` : ''}
+    <p class="note">${idx.dbError ? esc(idx.dbError) : `Runs on the database your app is connected to right now: ${where}. Only use it on a development database.`}${idx.result && idx.result.created ? ' This changed only this database: add the SQL to a migration so other environments get it too.' : ''}</p>
+    <div class="fix-actions">${actions}<span class="error" role="alert">${esc(idx.error || '')}</span></div>`;
+}
+
+document.addEventListener('click', async (e) => {
+  const create = e.target.closest('#idx-create');
+  const drop = e.target.closest('#idx-drop');
+  if (!create && !drop) return;
+  idx.busy = true; idx.error = ''; renderFix();
+  try {
+    if (create) { idx.result = await aiPost('/api/index/create', { key: fixJob.issueKey }); idx.dropped = false; }
+    else { await aiPost('/api/index/drop', { key: fixJob.issueKey }); idx.result = null; idx.dropped = true; }
+    lastTotal = -1; poll();
+  } catch (err) { idx.error = err.message; }
+  idx.busy = false;
+  renderFix();
+});
 
 function escalateBtn(j) {
   if (j.errorCode === 'billing') return `<a class="btn primary" href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">Add credits</a>`;
@@ -915,6 +956,7 @@ document.addEventListener('click', async (e) => {
     const issue = issueFrom(fx.dataset.aiFix);
     if (!issue) return;
     fixError = '';
+    idx = {};
     try { fixJob = await aiPost('/api/ai/fix', { key: issue.key }); }
     catch (err) { fixJob = null; fixError = err.message; }
     renderFix();

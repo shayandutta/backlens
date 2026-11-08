@@ -291,7 +291,10 @@ export function summarize(traces, known = [], advice = [], fixed = new Map()) {
       perRoute.get(route).lastAt = Math.max(perRoute.get(route).lastAt, trace.at || 0);
     }
     const big = a.rows >= 1000;
-    const name = `${a.table}_${a.columns.join('_')}_idx`.slice(0, 63);
+    // Filter columns first, then the ORDER BY columns, so rows come out already sorted.
+    const cols = [...a.columns.map((c) => ({ name: c, desc: false })), ...(Array.isArray(a.sort) ? a.sort : []).filter((c) => c && typeof c.name === 'string')];
+    const name = `${a.table}_${cols.map((c) => c.name).join('_')}_idx`.slice(0, 63);
+    const colText = cols.map((c) => `${c.name}${c.desc ? ' DESC' : ''}`).join(', ');
     for (const [route, info] of perRoute) {
       const key = `index|${route}|${sql}|${a.table}`;
       routes.get(route)?.issueKeys.add(key);
@@ -299,7 +302,8 @@ export function summarize(traces, known = [], advice = [], fixed = new Map()) {
         type: 'index',
         severity: big ? 'warn' : 'hint',
         title: `No index for ${a.table} filtered by ${a.columns.join(', ')}`,
-        fix: `Postgres reads every row of ${a.table} (${a.rows.toLocaleString('en')} now${big ? '' : ', fine while small, slow as it grows'}). Add: CREATE INDEX CONCURRENTLY ${name} ON ${a.schema === 'public' ? '' : `${a.schema}.`}${a.table} (${a.columns.join(', ')});`,
+        fix: `Postgres reads every row of ${a.table} (${a.rows.toLocaleString('en')} now${big ? '' : ', fine while small, slow as it grows'}). Add: CREATE INDEX CONCURRENTLY ${name} ON ${a.schema === 'public' ? '' : `${a.schema}.`}${a.table} (${colText});`,
+        index: { schema: a.schema || 'public', table: a.table, name, columns: cols, sql: a.sql },
         sql,
         sites: appFrame(info.span.frames) ? [at(appFrame(info.span.frames))] : [],
         frames: [info.span.frames],

@@ -232,6 +232,10 @@ if (TARGET && !globalThis.__backlens) {
           if (address && typeof address === 'object') post('/listening', { port: address.port, pid: process.pid, source: SOURCE });
         } catch {}
       }
+      if (event === 'request' && req && res && req.url === '/__backlens/index' && req.method === 'POST' && tokenOk(req.headers['x-backlens-token'])) {
+        handleCommand(req, res);
+        return true;
+      }
       if (event !== 'request' || !req || !res || req.headers['x-backlens'] === 'skip' || INTERNAL.test(req.url || '')) return emit.apply(this, arguments);
       const trace = {
         id: randomUUID(),
@@ -304,13 +308,25 @@ if (TARGET && !globalThis.__backlens) {
     return cols;
   }
 
-  function seqScans(node, out = []) {
+  /** 'reviews.updated_at DESC' -> { table: 'reviews', name: 'updated_at', desc: true } */
+  function sortKey(key) {
+    const m = String(key).match(/^(?:"?(\w+)"?\.)?"?([a-z_]\w*)"?(?:\s+(ASC|DESC))?(?:\s+NULLS\s+(?:FIRST|LAST))?$/i);
+    return m ? { table: m[1] || null, name: m[2], desc: /desc/i.test(m[3] || '') } : null;
+  }
+
+  // A sort above the scan (ORDER BY … LIMIT) is worth putting in the index after the filter
+  // columns: Postgres then reads rows already in order and stops at the limit.
+  function seqScans(node, out = [], sort = []) {
     if (!node) return out;
+    if (/Sort$/.test(node['Node Type']) && Array.isArray(node['Sort Key'])) sort = node['Sort Key'].map(sortKey);
     if (node['Node Type'] === 'Seq Scan' && node['Relation Name'] && node.Filter) {
       const columns = columnsCompared(node.Filter);
-      if (columns.length) out.push({ table: node['Relation Name'], schema: node.Schema || 'public', columns, filter: node.Filter });
+      const alias = node.Alias || node['Relation Name'];
+      const order = sort.every((k) => k && (!k.table || k.table === alias)) ? sort.filter((k) => !columns.includes(k.name)) : [];
+      if (columns.length) out.push({ table: node['Relation Name'], schema: node.Schema || 'public', columns, sort: order.map(({ name, desc }) => ({ name, desc })), filter: node.Filter });
     }
-    for (const child of node.Plans || []) seqScans(child, out);
+    const keep = /^(Sort|Incremental Sort|Limit|Gather|Gather Merge|Result)$/.test(node['Node Type']) ? sort : [];
+    for (const child of node.Plans || []) seqScans(child, out, keep);
     return out;
   }
 
@@ -336,8 +352,99 @@ if (TARGET && !globalThis.__backlens) {
       if (!rows[0]) continue;
       const leading = rows[0].leading || [];
       if (scan.columns.some((col) => leading.includes(col))) continue;
-      post('/advice', { sql: text, table: scan.table, schema: scan.schema, columns: scan.columns, rows: Math.max(0, Number(rows[0].rows)) });
+      post('/advice', { sql: text, table: scan.table, schema: scan.schema, columns: scan.columns, sort: scan.sort, rows: Math.max(0, Number(rows[0].rows)) });
     }
+  }
+
+  // ---- creating the suggested index, when the user asks in the dashboard ----------------
+  // The dashboard sends one internal request to the app, with its private token. Only an index
+  // on named columns can be created or dropped, built here from checked names, never from SQL
+  // text; the plan check only re-explains a statement this process already explained.
+  const IDENT = /^[a-z_][a-z0-9_$]{0,62}$/i;
+  const q = (name) => `"${name}"`;
+
+  function tokenOk(value) {
+    if (!TOKEN || typeof value !== 'string' || value.length !== TOKEN.length) return false;
+    return require('node:crypto').timingSafeEqual(Buffer.from(value), Buffer.from(TOKEN));
+  }
+
+  async function indexCommand(body) {
+    if (!advisorPool) throw new Error('The app has not used Postgres yet. Use the page once, then try again.');
+    const pool = advisorPool;
+    if (body.action === 'info') {
+      const { rows } = await pool.query('select current_database() as database, inet_server_addr()::text as address, inet_server_port() as port');
+      const o = pool.options || {};
+      let host = o.host;
+      try {
+        if (!host && o.connectionString) host = new URL(o.connectionString).hostname;
+      } catch {}
+      return { database: rows[0].database, host: host || rows[0].address || 'local socket', port: rows[0].port };
+    }
+    const { schema, table, name } = body;
+    const columns = Array.isArray(body.columns) ? body.columns : [];
+    if (![schema, table, name].every((x) => typeof x === 'string' && IDENT.test(x)) || !columns.length || columns.length > 8 || !columns.every((c) => c && typeof c.name === 'string' && IDENT.test(c.name))) {
+      throw new Error('That is not an index backlens suggested.');
+    }
+    if (body.action === 'create') {
+      const cols = columns.map((c) => `${q(c.name)}${c.desc ? ' DESC' : ''}`).join(', ');
+      // CONCURRENTLY builds without blocking writes; it cannot run inside a transaction, so a
+      // plain pool query (its own connection, autocommit) is used.
+      await pool.query(`CREATE INDEX CONCURRENTLY IF NOT EXISTS ${q(name)} ON ${q(schema)}.${q(table)} (${cols})`);
+      const { rows } = await pool.query(
+        `select i.indisvalid as valid from pg_class c join pg_index i on i.indexrelid = c.oid join pg_namespace n on n.oid = c.relnamespace where c.relname = $1 and n.nspname = $2`,
+        [name, schema],
+      );
+      if (!rows[0] || !rows[0].valid) throw new Error('Postgres did not finish building the index. Drop it and try again.');
+      // Can Postgres use it for the query that showed the issue? On a small table it still
+      // prefers reading every row, so the check asks with sequential scans turned off.
+      let usable = null;
+      if (typeof body.sql === 'string' && explained.has(body.sql)) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query('SET LOCAL enable_seqscan = off');
+          const prefix = /\$\d/.test(body.sql) ? 'EXPLAIN (GENERIC_PLAN, FORMAT JSON) ' : 'EXPLAIN (FORMAT JSON) ';
+          const plan = JSON.stringify((await client.query(prefix + body.sql)).rows[0]['QUERY PLAN']);
+          usable = plan.includes(`"Index Name":"${name}"`);
+        } catch {
+          usable = null;
+        } finally {
+          await client.query('ROLLBACK').catch(() => {});
+          client.release();
+        }
+      }
+      return { created: true, usable };
+    }
+    if (body.action === 'drop') {
+      await pool.query(`DROP INDEX CONCURRENTLY IF EXISTS ${q(schema)}.${q(name)}`);
+      return { dropped: true };
+    }
+    throw new Error('Unknown action.');
+  }
+
+  function handleCommand(req, res) {
+    let raw = '';
+    req.on('data', (c) => {
+      raw += c;
+      if (raw.length > 64 * 1024) req.destroy();
+    });
+    req.on('end', () => {
+      let body = null;
+      try {
+        body = JSON.parse(raw);
+      } catch {}
+      const send = (status, payload) => {
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(payload));
+      };
+      if (!body) return send(400, { error: 'Bad request.' });
+      storage.exit(() =>
+        indexCommand(body).then(
+          (out) => send(200, out),
+          (err) => send(400, { error: String((err && err.message) || err) }),
+        ),
+      );
+    });
   }
 
   function maybeAdvise(text) {

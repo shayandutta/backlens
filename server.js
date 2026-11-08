@@ -32,6 +32,33 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
   const traces = [];
   // Issue key -> when its fix was kept (see summarize).
   const fixedAt = new Map();
+  // Issue key -> the index created for it from the dashboard, so Undo still knows it.
+  const createdIndexes = new Map();
+
+  /** Sends one command to the recorder inside the app (see register.cjs). */
+  function appCommand(port, body) {
+    return new Promise((resolve, reject) => {
+      const payload = JSON.stringify(body);
+      const r = http.request(
+        { host: '127.0.0.1', port, method: 'POST', path: '/__backlens/index', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload), 'x-backlens-token': token } },
+        (res) => {
+          let raw = '';
+          res.on('data', (c) => (raw += c));
+          res.on('end', () => {
+            let out = null;
+            try {
+              out = JSON.parse(raw);
+            } catch {}
+            if (res.statusCode === 200 && out) resolve(out);
+            else reject(new Error((out && out.error) || 'The app did not answer. Is it running with backlens?'));
+          });
+        },
+      );
+      r.setTimeout(10 * 60 * 1000, () => r.destroy(new Error('Creating the index took over 10 minutes.')));
+      r.on('error', (err) => reject(new Error(`Could not reach the app: ${err.message}`)));
+      r.end(payload);
+    });
+  }
   let received = 0;
   const known = new Map();
   const advice = new Map();
@@ -302,6 +329,34 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
       tests.lines = [];
       tests.start(scriptCommand(pm, config.test), root);
       return json(res, 200, { ok: true });
+    }
+    // Creating a suggested index on the database the app is using, through the app itself.
+    if (req.method === 'POST' && url.pathname.startsWith('/api/index/')) {
+      const action = url.pathname.slice('/api/index/'.length);
+      if (!['info', 'create', 'drop'].includes(action)) return json(res, 404, { error: 'not found' });
+      if (!app || !app.port) return json(res, 409, { error: 'The app is not running. Start it first.' });
+      const body = (await readJson(req)) || {};
+      let index = null;
+      if (action !== 'info') {
+        const { issues } = summarize(traces, [...known.keys()], [...advice.values()]);
+        const issue = issues.find((i) => i.key === body.key);
+        index = issue && issue.index ? issue.index : createdIndexes.get(body.key);
+        if (!index) return json(res, 404, { error: 'That suggestion is gone. Refresh the list.' });
+      }
+      try {
+        const out = await appCommand(app.port, { action, ...(index || {}) });
+        if (action === 'create') {
+          createdIndexes.set(body.key, index);
+          fixedAt.set(body.key, Date.now());
+        }
+        if (action === 'drop') {
+          createdIndexes.delete(body.key);
+          fixedAt.delete(body.key);
+        }
+        return json(res, 200, { ...out, index });
+      } catch (err) {
+        return json(res, 400, { error: err.message });
+      }
     }
     if (url.pathname.startsWith('/api/ai/')) {
       try {
