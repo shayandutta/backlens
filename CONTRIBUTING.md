@@ -30,7 +30,7 @@ Where things live:
 
 | File | What it does |
 |---|---|
-| `register.cjs` | the recorder loaded inside the app: requests, `pg`, `ioredis`, `fetch`, call sites, the index advisor |
+| `register.cjs` | the recorder loaded inside the app: requests, `pg`, `ioredis`, node-redis, `fetch`, outgoing `http`/`https`, call sites, the index advisor |
 | `analyze.js` | turns recorded requests into issues, routes and the map |
 | `server.js` | the dashboard server and its API |
 | `ui.html` | the dashboard, one file, no build step |

@@ -206,7 +206,7 @@ if (TARGET && !globalThis.__backlens) {
   // project actually has.
   function patchFromApp() {
     const fromApp = Module.createRequire(path.join(process.cwd(), 'backlens-probe.js'));
-    for (const name of ['pg', 'ioredis']) {
+    for (const name of ['pg', 'ioredis', 'redis', '@redis/client']) {
       try {
         fromApp.resolve(name);
       } catch {
@@ -534,6 +534,12 @@ if (TARGET && !globalThis.__backlens) {
   }
 
   // ---- Redis (ioredis) ---------------------------------------------------------------
+  // Commands whose first argument is a password or other secret: shown by name only.
+  const SECRET_COMMANDS = new Set(['AUTH', 'HELLO', 'MIGRATE', 'ACL', 'CONFIG']);
+  function redisLabel(name, key) {
+    if (SECRET_COMMANDS.has(name) || key === undefined || key === null) return name;
+    return `${name} ${redact(String(key))}`;
+  }
   function patchIoredis(mod) {
     const Redis = (mod && mod.default) || mod;
     const proto = Redis && Redis.prototype;
@@ -544,12 +550,85 @@ if (TARGET && !globalThis.__backlens) {
       if (command && command.name) {
         const name = command.name.toUpperCase();
         const key = name === 'EVAL' || name === 'EVALSHA' ? command.args[2] : command.args[0];
-        const end = begin('redis', `${name}${key !== undefined ? ` ${redact(key)}` : ''}`, { params: hashValues(command.args) });
+        const end = begin('redis', redisLabel(name, key), { params: hashValues(command.args) });
         if (end && command.promise) command.promise.then((v) => end(name === 'GET' ? { hit: v !== null } : null), () => end({ error: true }));
       }
       return sendCommand.apply(this, arguments);
     };
   }
+
+  // ---- Redis (node-redis v4 and v5) ----------------------------------------------------
+  // Every command, pipelines and MULTI included, goes through the queue's addCommand. The client
+  // keeps its own send path in private methods, so the queue is the one place to wrap.
+  function patchRedisQueue(mod) {
+    const Queue = mod && mod.default;
+    const proto = Queue && Queue.prototype;
+    if (!proto || typeof proto.addCommand !== 'function' || proto.__backlens) return;
+    proto.__backlens = true;
+    const addCommand = proto.addCommand;
+    proto.addCommand = function (args) {
+      const end =
+        Array.isArray(args) && args.length && storage.getStore()
+          ? (() => {
+              const name = String(args[0]).toUpperCase();
+              const key = name === 'EVAL' || name === 'EVALSHA' || name === 'FCALL' ? args[3] : args[1];
+              return begin('redis', redisLabel(name, key), { params: hashValues(args.slice(1)) });
+            })()
+          : null;
+      const p = addCommand.apply(this, arguments);
+      if (end && p && typeof p.then === 'function') {
+        const name = String(args[0]).toUpperCase();
+        p.then((v) => end(name === 'GET' ? { hit: v !== null } : null), () => end({ error: true }));
+      }
+      return p;
+    };
+  }
+
+  // ---- outgoing http and https (axios, got, node-fetch, SDKs) ---------------------------
+  // Global fetch runs on undici and never reaches these, so nothing is counted twice. The
+  // recorder's own reports run outside any request, where begin() records nothing.
+  function describeRequest(req, fallback) {
+    try {
+      const host = (typeof req.getHeader === 'function' && req.getHeader('host')) || req.host || '';
+      return `${req.method || 'GET'} ${host}${String(req.path || '/').split('?')[0]}`;
+    } catch {
+      return fallback;
+    }
+  }
+  function wrapOutgoing(mod, scheme) {
+    for (const fn of ['request', 'get']) {
+      const original = mod[fn];
+      if (typeof original !== 'function' || original.__backlens) continue;
+      const wrapped = function () {
+        const req = original.apply(this, arguments);
+        if (!storage.getStore() || !req || typeof req.once !== 'function') return req;
+        const end = begin('http', describeRequest(req, scheme));
+        if (!end) return req;
+        let done = false;
+        const finish = (detail) => {
+          if (done) return;
+          done = true;
+          end(detail);
+        };
+        req.once('response', (res) => {
+          const status = res.statusCode;
+          res.once('end', () => finish({ status }));
+          res.once('close', () => finish({ status }));
+        });
+        req.once('error', () => finish({ error: true }));
+        req.once('close', () => finish(null));
+        return req;
+      };
+      wrapped.__backlens = true;
+      mod[fn] = wrapped;
+    }
+  }
+  wrapOutgoing(http, 'http');
+  wrapOutgoing(https, 'https');
+  try {
+    // ESM `import { request } from 'node:http'` reads a copy of the exports; this refreshes it.
+    Module.syncBuiltinESMExports();
+  } catch {}
 
   // ---- outgoing fetch ----------------------------------------------------------------
   if (typeof globalThis.fetch === 'function') {
@@ -615,6 +694,7 @@ if (TARGET && !globalThis.__backlens) {
       if (request === 'pg') patchPg(exported);
       else if (request === 'ioredis') patchIoredis(exported);
       else if (request === 'fastify') return wrapFastify(exported);
+      else if (request.endsWith('/commands-queue')) patchRedisQueue(exported);
     } catch {}
     return exported;
   };

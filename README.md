@@ -114,12 +114,14 @@ The first time, pick which `package.json` script starts the app (like `dev`) and
 |---|---|
 | Frameworks | express, fastify, nest, Next.js route handlers, plain `node:http` |
 | Database | `pg` (Client and Pool): drizzle, Kysely, knex, raw SQL on Postgres |
-| Cache | `ioredis` |
-| Outgoing calls | global `fetch` |
+| Cache | `ioredis`, `redis` (node-redis v4 and v5) |
+| Outgoing calls | `fetch`, and anything on `http`/`https`: axios, got, node-fetch, most SDKs |
 | Modules | CommonJS and ESM, vitest included |
 | Runtime | Node 20+, tested on macOS; Linux should work the same way |
 
 Not yet: Prisma, mysql2, MongoDB, Windows.
+
+Redis passwords never show: `AUTH`, `HELLO` and similar commands are recorded by name only.
 
 ## Privacy and safety
 
@@ -136,7 +138,7 @@ Not yet: Prisma, mysql2, MongoDB, Windows.
 `backlens` starts the dashboard, then runs your app with `NODE_OPTIONS=--require backlens/register`. Inside your app, the recorder:
 
 - times each request on Node's own HTTP server, so any framework on top of it works;
-- wraps `pg`, `ioredis` and `fetch`, and records the line of your code behind each call, through V8's async stack traces for ORMs like drizzle and through source maps for bundled code;
+- wraps `pg`, `ioredis`, node-redis, `fetch` and outgoing `http`/`https`, and records the line of your code behind each call, through V8's async stack traces for ORMs like drizzle and through source maps for bundled code;
 - asks Postgres for each distinct SELECT's plan with `EXPLAIN (GENERIC_PLAN)` (Postgres 16+), which never runs the query, and flags full-table reads no index covers.
 
 ## Limits
