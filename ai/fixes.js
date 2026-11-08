@@ -210,7 +210,20 @@ export function createAI(deps) {
         replace = cleanCode(e.new_code);
         const ranges = shown.get(file);
         if (from < 1 || to < from || to > lines.length || !ranges.some((r) => from >= r.from && to <= r.to)) {
-          rejected.push({ file, from, to, reason: `lines ${from}-${to} are outside what you were shown in ${file} (${ranges.map((r) => `${r.from}-${r.to}`).join(', ')})` });
+          // Small models often number later edits as if the earlier ones were already applied.
+          const shift = ok
+            .filter((o) => o.file === file && o.to < from)
+            .reduce((n, o) => n + o.replace.split('\n').length - (o.to - o.from + 1), 0);
+          const was = { from: from - shift, to: to - shift };
+          const shifted = shift !== 0 && ranges.some((r) => was.from >= r.from && was.to <= r.to);
+          rejected.push({
+            file,
+            from,
+            to,
+            reason: shifted
+              ? `lines ${from}-${to} are numbered as if your earlier edit were already applied. Number every edit by the original lines shown: these look like lines ${was.from}-${was.to}`
+              : `lines ${from}-${to} are outside what you were shown in ${file} (${ranges.map((r) => `${r.from}-${r.to}`).join(', ')})`,
+          });
           continue;
         }
       } else if (typeof e.find === 'string' && e.find) {

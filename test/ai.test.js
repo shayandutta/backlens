@@ -107,3 +107,29 @@ test('a find that ends mid-line keeps the rest of the line', async () => {
   assert.deepEqual(done.diff[0].removed.map((l) => l.text), ['    return this.mine(id);']);
   assert.ok(readFileSync(join(root, 'a.ts'), 'utf8').includes('async remove(id: string)'));
 });
+
+test('an edit numbered after an earlier edit is caught and the original lines are named', async () => {
+  const { mkdtempSync, writeFileSync, mkdirSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { createAI } = await import('../ai/fixes.js');
+  const root = mkdtempSync(join(tmpdir(), 'bl-'));
+  const body = ['async function wall() {', '  const a = await one();', '  for (const x of a) {', '    await two(x);', '  }', '  return {', '    total: a.length,', '    items: a,', '  };', '}', ''];
+  writeFileSync(join(root, 'a.ts'), body.join('\n'));
+  const issue = { key: 'k', type: 'n-plus-one', title: 't', route: 'GET /', sites: ['a.ts:4'], sql: '', fix: '', frames: [], example: 'x', seen: 1, of: 1, cost: 1 };
+  const ai = createAI({ root, pm: 'npm', config: () => null, readProject: () => ({ scripts: {} }), getIssue: () => issue, pauseWatch: () => {} });
+  mkdirSync(join(root, '.backlens'), { recursive: true });
+  // Lines 3-5 become 6 lines (+3), then line 8 of the original is called line 11.
+  const edits = [
+    { file: 'a.ts', from_line: 3, to_line: 5, new_code: '  const b = await all(a);\n  void b;\n  void b;\n  void b;\n  void b;\n  void b;' },
+    { file: 'a.ts', from_line: 11, to_line: 11, new_code: '    items: b,' },
+  ];
+  writeFileSync(join(root, '.backlens', 'ai-fixtures.json'), JSON.stringify([{ match: 'a.ts', response: { explanation: 'x', confidence: 'high', notes: '', edits } }]));
+  ai.saveSettings({ provider: 'mock' });
+  const job = await ai.startFix('k');
+  await ai.send(job.id);
+  await new Promise((r) => setTimeout(r, 50));
+  const done = ai.getFix(job.id);
+  assert.equal(done.rejected.length, 1);
+  assert.match(done.rejected[0].reason, /as if your earlier edit were already applied.*lines 8-8/);
+});

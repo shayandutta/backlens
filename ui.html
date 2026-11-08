@@ -702,7 +702,10 @@ function feedItem(e) {
   if (e.kind === 'ask') {
     const secs = e.status === 'running' && e.startedAt && fixJob ? Math.max(0.1, (fixJob.now - e.startedAt) / 1000 + (Date.now() - fixFetchedAt) / 1000) : 0;
     const live = e.status === 'running' ? `${secs.toFixed(0)} s${e.tokens ? `, ${e.tokens} tokens, ${(e.tokens / secs).toFixed(1)} per second` : ', reading the code…'}` : esc(e.detail || '');
-    return `<li class="fi">${dot}<div><div class="fh"><b>${esc(e.title)}</b>${t}</div><div class="sub2">${live}</div>${e.status === 'running' ? '<button class="ghost" type="button" id="fix-stop" style="margin-top:6px">Stop</button>' : ''}</div></li>`;
+    // A local model under ~8 tokens a second takes minutes per answer: say why, and what helps.
+    const slow = e.status === 'running' && fixJob.route && fixJob.route.kind === 'ollama' && secs > 15 && e.tokens / secs < 8;
+    const hint = slow ? `<div class="sub2 muted">The local model is slow on this computer (it shares memory with your other apps). Closing some speeds it up; Claude answers in seconds.</div>` : '';
+    return `<li class="fi">${dot}<div><div class="fh"><b>${esc(e.title)}</b>${t}</div><div class="sub2">${live}</div>${hint}${e.status === 'running' ? '<button class="ghost" type="button" id="fix-stop" style="margin-top:6px">Stop</button>' : ''}</div></li>`;
   }
   if (e.kind === 'verdict') return `<li class="fi">${dot}<div class="verdict ${e.status === 'done' ? 'good' : e.status === 'warn' ? 'meh' : 'bad'}">${esc(e.title)}</div></li>`;
   const verb = e.kind === 'read' ? 'Read' : e.kind === 'repair' ? '↻' : '';

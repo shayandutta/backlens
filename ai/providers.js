@@ -31,6 +31,7 @@ Risks or assumptions, or why there are no edits.
 
 Rules for edits:
 - An EDIT replaces whole lines, from the first to the last number given (inclusive), using the numbers shown. The code block is everything that goes there instead; it can have more or fewer lines. An empty code block deletes the lines.
+- Every EDIT uses the original line numbers shown, even after an earlier EDIT adds or removes lines. Never renumber.
 - Write as many EDIT blocks as needed, or none if no change is safe. CONFIDENCE is high, medium or low.
 - Only edit lines you were shown, in files you were shown. Edits must not overlap.
 - Change as little as possible. Keep the code's style, names and types. Do not change behaviour: same results, same errors, same order of side effects. Only remove repeated work or run independent work together.
