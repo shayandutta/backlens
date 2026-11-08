@@ -12,6 +12,7 @@
   },
   "files": [
     "bin",
+    "ai",
     "register.cjs",
     "server.js",
     "analyze.js",
@@ -29,5 +30,25 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",
     "typescript": "^5.9.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shayandutta/backlens.git"
+  },
+  "homepage": "https://github.com/shayandutta/backlens#readme",
+  "bugs": {
+    "url": "https://github.com/shayandutta/backlens/issues"
+  },
+  "keywords": [
+    "node",
+    "backend",
+    "performance",
+    "n+1",
+    "postgres",
+    "redis",
+    "tracing",
+    "profiling",
+    "devtools"
+  ],
+  "author": "Shayan Dutta"
 }
