@@ -157,7 +157,8 @@
   a.btn { text-decoration: none; display: inline-block; }
   .compare-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 4px 0 14px; }
   .compare-card h4 { margin: 0 0 8px; font-size: 13px; }
-  .compare-card table { width: auto; border-collapse: collapse; font: 13px var(--mono); }
+  .compare-card table { width: auto; max-width: 100%; border-collapse: collapse; font: 13px var(--mono); margin-bottom: 10px; }
+  .compare-card td, .compare-card th { white-space: nowrap; }
   .compare-card th { text-align: left; font-weight: 400; color: var(--sub); padding: 3px 18px 3px 0; }
   .compare-card td { padding: 3px 10px 3px 0; }
   .compare-card .arrow { color: var(--sub); }
@@ -769,20 +770,20 @@ function compareCard(j) {
   const c = j.compare;
   if (!c || !c.before || !['verified', 'failed', 'unverified', 'kept', 'reverted'].includes(j.stage)) return '';
   const pct = (a, b) => (a ? Math.round(((b - a) / a) * 100) : 0);
-  const row = (label, a, b, fmt = (x) => x, lowerIsBetter = true) => {
+  const row = (label, a, b, fmt = (x) => x, noise = 0) => {
     const d = pct(a, b);
-    const tone = a === b ? 'same' : (b < a) === lowerIsBetter ? 'better' : 'worse';
-    return `<tr><th>${label}</th><td>${fmt(a)}</td><td class="arrow">→</td><td class="${tone}">${fmt(b)}</td><td class="${tone} delta">${a === b ? '' : `${d > 0 ? '+' : ''}${d}%`}</td></tr>`;
+    // Small time differences are noise, not a result: shown plain, not green or red.
+    const tone = a === b || Math.abs(b - a) <= noise ? 'same' : b < a ? 'better' : 'worse';
+    return `<tr><th>${label}</th><td>${fmt(a)}</td><td class="arrow">→</td><td class="${tone}">${fmt(b)}</td><td class="${tone} delta">${tone === 'same' ? '' : `${d > 0 ? '+' : ''}${d}%`}</td></tr>`;
   };
-  const kind = esc((j.issueTitle || '').split(':')[0]);
   return `<section class="compare-card"><h4>Same request, before and after the change</h4><table>
-    ${row('time', c.before.ms, c.after.ms, (x) => ms(x))}
+    ${row('time (median)', c.before.ms, c.after.ms, (x) => ms(x), Math.max(3, c.before.ms * 0.15))}
     ${row('database queries', c.before.queries, c.after.queries)}
     ${c.before.redis || c.after.redis ? row('redis calls', c.before.redis, c.after.redis) : ''}
     ${c.before.http || c.after.http ? row('outgoing http', c.before.http, c.after.http) : ''}
     <tr><th>status</th><td>${c.before.status}</td><td class="arrow">→</td><td class="${c.before.status === c.after.status ? 'same' : 'worse'}">${c.after.status}</td><td></td></tr>
-    <tr><th>issue</th><td>${kind || 'found'}</td><td class="arrow">→</td><td class="${c.issueGone ? 'better' : 'worse'}">${c.issueGone ? 'gone' : 'still there'}</td><td></td></tr>
-  </table><p class="note">One request each${c.warmed ? ', the after one measured once the restarted app was warm' : ''}. Query counts are exact; times vary a few ms from run to run.</p></section>`;
+    <tr><th>issue</th><td>found</td><td class="arrow">→</td><td class="${c.issueGone ? 'better' : 'worse'}">${c.issueGone ? 'gone' : 'still there'}</td><td></td></tr>
+  </table><p class="note">Before: ${c.beforeRuns} recorded request${c.beforeRuns === 1 ? '' : 's'}. After: ${c.afterRuns} replay${c.afterRuns === 1 ? '' : 's'}${c.warmed ? ', after warming the restarted app up' : ''}. Query counts are exact; a time change within a few ms is noise.</p></section>`;
 }
 
 // ---- creating a suggested index from the drawer ----------------------------------------

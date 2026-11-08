@@ -422,6 +422,12 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
           return issues.find((i) => i.key === key) || (testRun.report ? testRun.report.issues.find((i) => i.key === key) : null);
         },
         getTrace: (id) => traces.find((t) => t.id === id) || testRun.traces.find((t) => t.id === id),
+        // Recorded requests on a route since the last fix kept there (the code they ran is the
+        // code being changed now), oldest first.
+        routeTraces: (route) => {
+          const since = Math.max(0, ...[...fixedAt].filter(([key]) => key.split('|')[1] === route).map(([, at]) => at));
+          return traces.filter((t) => t.at > since && routeOf(t.method, t.url, t.template) === route);
+        },
         markFixed: (key, after) => {
           fixedAt.set(key, Date.now());
           if (after) {

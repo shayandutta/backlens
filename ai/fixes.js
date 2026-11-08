@@ -20,6 +20,9 @@ import { promiseAll } from './templates.js';
  */
 
 // Replaying a write sends it again, so it changes the dev database twice: reads only unless asked.
+// Replays after a fix: warm-up runs first, then measured runs (reads only).
+const WARMUPS = 3;
+const SAMPLES = 5;
 const DEFAULTS = { provider: null, ollamaModel: null, dailyBudgetUsd: 1, replay: true, replayWrites: false };
 const EDIT_REPAIRS = 2;
 const TYPE_REPAIRS = 2;
@@ -483,6 +486,12 @@ export function createAI(deps) {
     return { ok: r.code === 0, errors: r.out };
   }
 
+  const median = (list) => {
+    const xs = [...list].sort((a, b) => a - b);
+    const mid = Math.floor(xs.length / 2);
+    return Math.round((xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2) * 100) / 100;
+  };
+
   /** What a request cost: the numbers shown before and after a fix. */
   function stats(trace) {
     const count = (kind) => trace.spans.filter((x) => x.kind === kind).length;
@@ -556,20 +565,33 @@ export function createAI(deps) {
     } else {
       // The app has just restarted, so its first request pays for cold caches and new connections.
       // A read is sent once to warm up, and the second one is measured.
-      if (!isWrite) await replay(job, payload, deps.appPort());
-      const trace = await replay(job, payload, deps.appPort());
+      // A just-restarted app is slow for its first requests (cold code, new database
+      // connections). A read is sent a few times to warm up, then measured several times and the
+      // median kept. A write runs once: replaying it changes data again.
+      const samples = [];
+      if (!isWrite) for (let i = 0; i < WARMUPS; i++) await replay(job, payload, deps.appPort());
+      for (let i = 0; i < (isWrite ? 1 : SAMPLES); i++) {
+        const t = await replay(job, payload, deps.appPort());
+        if (!t) break;
+        samples.push(t);
+      }
+      const trace = samples.at(-1);
       if (!trace) {
         r.status = 'fail';
         r.detail = 'the replayed request did not finish within 20 s';
         return finish(job, false, 'The replayed request did not come back.');
       }
       replayed = true;
-      const still = checkTrace(trace).some((i) => sameIssue(i, job.issue));
+      const still = samples.some((t) => checkTrace(t).some((i) => sameIssue(i, job.issue)));
       const sameClass = original ? Math.floor(trace.status / 100) === Math.floor(original.status / 100) : trace.status < 400;
-      const before = original ? `${original.status} in ${original.duration} ms, ${original.spans.length} calls` : '';
+      // Before: the same route's recorded requests from before the change, not just one of them.
+      const earlier = (deps.routeTraces ? deps.routeTraces(job.issue.route) : []).filter((t) => t.status === (original || trace).status);
+      const beforeList = earlier.length ? earlier.slice(-SAMPLES) : original ? [original] : [];
+      const after = { ...stats(trace), ms: median(samples.map((t) => t.duration)) };
+      const before = beforeList.length ? { ...stats(original || beforeList.at(-1)), ms: median(beforeList.map((t) => t.duration)) } : null;
       r.status = !still && sameClass ? 'done' : 'fail';
-      r.detail = `before: ${before}\nafter:  ${trace.status} in ${trace.duration} ms, ${trace.spans.length} calls${still ? ', issue still there' : ', issue gone'}`;
-      job.compare = { before: original ? stats(original) : null, after: stats(trace), issueGone: !still, warmed: !isWrite };
+      r.detail = `before: ${before ? `${before.status}, median ${before.ms} ms of ${beforeList.length} recorded, ${before.queries} queries` : 'no recorded request'}\nafter:  ${after.status}, median ${after.ms} ms of ${samples.length} replays, ${after.queries} queries${still ? ', issue still there' : ', issue gone'}`;
+      job.compare = { before, after, beforeRuns: beforeList.length, afterRuns: samples.length, issueGone: !still, warmed: !isWrite };
       job.afterTrace = trace;
       if (trace.status === 401 && original && original.status !== 401) r.detail += '\nThe recorded login may have expired: sign in again and use the page once more.';
       if (r.status === 'fail') return finish(job, false, still ? 'The issue is still there after the change.' : `The request now answers ${trace.status}.`);
