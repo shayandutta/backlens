@@ -756,7 +756,7 @@ function renderFix() {
   if (j.stage === 'failed') act.push('<button class="primary" type="button" id="fix-revert">Revert</button><button class="ghost" type="button" id="fix-keep">Keep anyway</button>');
   if (j.stage === 'unverified') act.push('<button class="ghost" type="button" id="fix-keep">Keep</button><button class="ghost" type="button" id="fix-revert">Revert</button>');
   if (j.stage === 'reverted' || j.stage === 'error') act.push(escalateBtn(j));
-  if (j.stage === 'proposed') act.push('<span class="note">Only applies if these files have no uncommitted changes, with a backup.</span>');
+  if (j.stage === 'proposed') act.push('<span class="note">backlens keeps an exact copy of each file first, uncommitted changes included. Revert puts it back.</span>');
   if (act.length || fixError) html += `<div class="fix-actions">${act.join('')}<span class="error" role="alert">${esc(fixError)}</span></div>`;
   el.innerHTML = html;
   el.querySelectorAll('[data-autoscroll]').forEach((t) => (t.scrollTop = t.scrollHeight));

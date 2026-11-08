@@ -55,7 +55,7 @@ In the Compare tab, save a snapshot, change your code, restart, use the same pag
 
 ## Explain and fix, with proof
 
-Every issue has **Explain** and **Suggest fix**. A fix goes: a preview of exactly what would be sent and to whom, the model's answer as a diff, **Apply and check** (only on files with no uncommitted changes, with a backup), then backlens rebuilds if needed, restarts your app, replays the request that showed the issue and runs your tests. Only a fix that removes the issue and keeps the tests green is marked proven. Keep it, or revert to the exact files you had.
+Every issue has **Explain** and **Suggest fix**. A fix goes: a preview of exactly what would be sent and to whom, the model's answer as a diff, **Apply and check** (with an exact copy of each file kept first, uncommitted changes included; Revert refuses to overwrite edits you made after the fix was applied), then backlens rebuilds if needed, restarts your app, replays the request that showed the issue and runs your tests. Only a fix that removes the issue and keeps the tests green is marked proven. Keep it, or revert to the exact files you had.
 
 Who answers is set up in **AI settings**, all from the dashboard. The first-run setup asks too.
 

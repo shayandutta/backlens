@@ -133,3 +133,52 @@ test('an edit numbered after an earlier edit is caught and the original lines ar
   assert.equal(done.rejected.length, 1);
   assert.match(done.rejected[0].reason, /as if your earlier edit were already applied.*lines 8-8/);
 });
+
+test('a fix applies to a file with uncommitted changes, and revert never overwrites later edits', async () => {
+  const { mkdtempSync, writeFileSync, readFileSync, mkdirSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { createAI } = await import('../ai/fixes.js');
+  const root = mkdtempSync(join(tmpdir(), 'bl-'));
+  const git = (...a) => execFileSync('git', ['-C', root, ...a], { stdio: 'ignore' });
+  git('init', '-q');
+  git('config', 'user.email', 't@t');
+  git('config', 'user.name', 't');
+  const file = join(root, 'a.ts');
+  writeFileSync(file, ['async function f() {', '  const a = await one();', '  const b = await two();', '  return [a, b];', '}', ''].join('\n'));
+  git('add', '.');
+  git('commit', '-qm', 'x');
+  // Uncommitted work: a comment at the end.
+  const dirty = readFileSync(file, 'utf8') + '// work in progress\n';
+  writeFileSync(file, dirty);
+
+  const issue = { key: 'k', type: 'repeat', title: 't', route: 'GET /', sites: ['a.ts:2'], sql: '', fix: '', frames: [], example: 'x', seen: 1, of: 1, cost: 1 };
+  const deps = { root, pm: 'npm', config: () => null, readProject: () => ({ scripts: {} }), getIssue: () => issue, pauseWatch: () => {}, restartApp: async () => null, appPort: () => null, getReplay: () => null, getTrace: () => null };
+  mkdirSync(join(root, '.backlens'), { recursive: true });
+  writeFileSync(join(root, '.backlens', 'ai-fixtures.json'), JSON.stringify([{ match: 'a.ts', response: { explanation: 'x', confidence: 'high', notes: '', edits: [{ file: 'a.ts', from_line: 2, to_line: 2, new_code: '  const a = await one(true);' }] } }]));
+  const settle = () => new Promise((r) => setTimeout(r, 100));
+
+  const run = async () => {
+    const ai = createAI(deps);
+    ai.saveSettings({ provider: 'mock', replay: false });
+    const job = await ai.startFix('k');
+    await ai.send(job.id);
+    await settle();
+    ai.apply(job.id);
+    await settle();
+    return { ai, id: job.id };
+  };
+
+  let { ai, id } = await run();
+  assert.ok(readFileSync(file, 'utf8').includes('one(true)'));
+  await ai.revert(id);
+  await settle();
+  assert.equal(readFileSync(file, 'utf8'), dirty, 'revert brings back the uncommitted version exactly');
+
+  ({ ai, id } = await run());
+  const edited = readFileSync(file, 'utf8') + '// edited by hand after the fix\n';
+  writeFileSync(file, edited);
+  await assert.rejects(ai.revert(id), /changed after the fix was applied/);
+  assert.equal(readFileSync(file, 'utf8'), edited, 'the later edit is left alone');
+});

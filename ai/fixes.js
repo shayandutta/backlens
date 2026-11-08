@@ -14,8 +14,8 @@ import { promiseAll } from './templates.js';
 /**
  * Explain and Fix. A fix runs like a careful developer at a terminal, and every step is written to
  * a live feed the dashboard shows: read the code, ask the model, check each edit fits the code
- * (sending problems back, up to twice), apply only to files with no uncommitted changes (with a
- * backup), typecheck (sending type errors back, up to twice), rebuild if needed, restart, replay
+ * (sending problems back, up to twice), apply (keeping an exact copy of each file as it was, uncommitted
+ * changes included), typecheck (sending type errors back, up to twice), rebuild if needed, restart, replay
  * the request that showed the issue, run the tests. Only then is it called proven.
  */
 
@@ -139,7 +139,7 @@ export function createAI(deps) {
   }
 
   const view = (job) => {
-    const { ctx, issue, backups, convo, abort, afterTrace, ...rest } = job;
+    const { ctx, issue, backups, convo, abort, afterTrace, written, ...rest } = job;
     return { ...rest, now: Date.now(), issueTitle: issue.title, issueRoute: issue.route, spentTodayUsd: spentToday(), budgetUsd: settings.dailyBudgetUsd };
   };
 
@@ -296,6 +296,14 @@ export function createAI(deps) {
     }
   }
 
+  function readSafe(file) {
+    try {
+      return readFileSync(file, 'utf8');
+    } catch {
+      return null;
+    }
+  }
+
   function restoreBackups(job) {
     for (const b of job.backups || []) copyFileSync(b.backup, join(root, b.file));
   }
@@ -402,17 +410,17 @@ export function createAI(deps) {
       return null; // not a git repository: backups are the only undo
     }
     const out = execFileSync('git', ['-C', root, 'status', '--porcelain', '--', ...files.map((f) => join(root, f))], { encoding: 'utf8' });
-    return out.trim().split('\n').filter(Boolean).map((l) => l.slice(3));
+    // Porcelain lines are 'XY path': the status columns can start with a space, so no trim before slicing.
+    return out.split('\n').filter((l) => l.trim()).map((l) => l.slice(3));
   }
 
   function apply(id) {
     const job = jobs.get(id);
     if (!job || job.stage !== 'proposed') throw new Error('There is no suggestion ready to apply.');
     const files = [...new Set(job.edits.map((e) => e.file))];
-    const dirty = gitDirty(files);
-    if (dirty && dirty.length) {
-      throw new Error(`${dirty.join(', ')} ${dirty.length === 1 ? 'has' : 'have'} uncommitted changes. Commit or stash ${dirty.length === 1 ? 'it' : 'them'} first, so this fix can always be undone cleanly.`);
-    }
+    // Files with uncommitted changes (an earlier kept fix, work in progress) are fine: the backup
+    // is an exact copy of the file as it is now, and Revert puts that copy back.
+    const dirty = gitDirty(files) || [];
     const backupDir = join(dir, 'ai', job.id);
     job.backups = [];
     for (const f of files) {
@@ -422,7 +430,13 @@ export function createAI(deps) {
       job.backups.push({ file: f, backup: dest });
     }
     writeEdits(job.edits);
-    ev(job, 'apply', `Applied ${job.edits.length} edit${job.edits.length === 1 ? '' : 's'} to ${files.join(', ')}`, { detail: 'backup kept until you keep or revert' });
+    // What backlens wrote, so Revert can tell whether someone edited the file afterwards.
+    job.written = Object.fromEntries(files.map((f) => [f, readFileSync(join(root, f), 'utf8')]));
+    ev(job, 'apply', `Applied ${job.edits.length} edit${job.edits.length === 1 ? '' : 's'} to ${files.join(', ')}`, {
+      detail: dirty.length
+        ? `a copy of ${dirty.join(', ')} as it was, uncommitted changes included, is kept until you keep or revert`
+        : 'backup kept until you keep or revert',
+    });
     job.stage = 'verifying';
     deps.pauseWatch(true);
     verify(job)
@@ -508,6 +522,7 @@ export function createAI(deps) {
       const ok = await propose(job, `Asking again with the type errors (${round + 1} of ${TYPE_REPAIRS})`);
       if (!ok.length) return finish(job, false, 'The model could not produce a change that typechecks.');
       writeEdits(ok);
+      job.written = Object.fromEntries(job.backups.map((b) => [b.file, readSafe(join(root, b.file))]));
       ev(job, 'apply', `Applied ${ok.length} corrected edit${ok.length === 1 ? '' : 's'}`);
     }
 
@@ -606,6 +621,11 @@ export function createAI(deps) {
   async function revert(id) {
     const job = jobs.get(id);
     if (!job || !job.backups || !job.backups.length) throw new Error('Nothing to revert.');
+    // Never overwrite edits made after the fix was applied.
+    const changed = job.backups.filter((b) => job.written && job.written[b.file] !== undefined && readSafe(join(root, b.file)) !== job.written[b.file]);
+    if (changed.length) {
+      throw new Error(`${changed.map((b) => b.file).join(', ')} changed after the fix was applied, so backlens did not overwrite it. The version from before the fix is at ${changed.map((b) => relative(root, b.backup)).join(', ')}.`);
+    }
     restoreBackups(job);
     append(historyFile, { at: new Date().toISOString(), type: job.issue.type, tier: job.route.tier || job.route.kind, model: job.route.model, verified: Boolean(job.verified), kept: false });
     cleanup(job);
