@@ -154,7 +154,7 @@
   .opt-card:has(input:checked) { border-color: var(--accent); background: #ffffff05; }
   .opt-card { cursor: default; } .opt-card > label { cursor: pointer; }
   .opt-card a { color: var(--accent); }
-  .opt-card .btn { text-decoration: none; display: inline-block; }
+  a.btn { text-decoration: none; display: inline-block; }
   .field input[type=password] { flex: 1; font: 13px var(--mono); color: var(--text); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 8px; }
   .progress { height: 6px; border-radius: 3px; background: var(--raise); overflow: hidden; margin: 10px 0 0; }
   .progress > div { height: 100%; background: var(--accent); transition: width .4s; }
@@ -755,6 +755,7 @@ function renderFix() {
 }
 
 function escalateBtn(j) {
+  if (j.errorCode === 'billing') return `<a class="btn primary" href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">Add credits</a>`;
   return j.attempt === 0 && j.route.kind === 'anthropic' ? `<button class="ghost" type="button" id="fix-escalate">Try a stronger model</button>` : '';
 }
 

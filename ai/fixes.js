@@ -387,6 +387,7 @@ export function createAI(deps) {
         job.stage = ok.length ? 'proposed' : 'no-edits';
       } catch (err) {
         job.error = err.message;
+        job.errorCode = err.code || null;
         job.stage = 'error';
       }
     })();

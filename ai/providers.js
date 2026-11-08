@@ -362,7 +362,12 @@ async function anthropic(task, messages, routeInfo) {
   } catch (err) {
     if (err instanceof Anthropic.AuthenticationError) throw new Error('Claude rejected the key. Paste a new one in AI settings.');
     if (err instanceof Anthropic.RateLimitError) throw new Error('Claude rate limit reached. Wait a minute and try again.');
-    if (err instanceof Anthropic.APIError) throw new Error(`Claude error ${err.status}: ${err.message}`);
+    // The SDK's message carries the raw JSON body; show the API's own sentence instead.
+    const said = err?.error?.error?.message || err.message;
+    if (err instanceof Anthropic.APIError && /credit balance/i.test(said)) {
+      throw Object.assign(new Error('Your Anthropic account has no credit left, so nothing was sent or charged. Add credits in the Anthropic Console, then try again.'), { code: 'billing' });
+    }
+    if (err instanceof Anthropic.APIError) throw new Error(`Claude error ${err.status}: ${said}`);
     throw err;
   }
   const cost = costUsd(routeInfo.tier, response.usage);
