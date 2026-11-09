@@ -41,14 +41,14 @@ export function loadConfig(root) {
 }
 
 /** config.json is shareable; snapshots, AI usage, history and fix backups are personal. */
-export const IGNORE = '# Personal: snapshots, AI usage and fix backups. config.json can be committed.\nsnapshots/\nai/\nai.json\nai-usage.jsonl\nai-history.jsonl\nai-fixtures.json\n';
+export const IGNORE = '# Personal: snapshots, AI usage, fix backups and the running session. config.json can be committed.\nsnapshots/\nai/\nai.json\nai-usage.jsonl\nai-history.jsonl\nai-fixtures.json\nsession.json\n';
 export function ensureIgnore(root) {
   const ignore = join(root, '.backlens', '.gitignore');
   let current = '';
   try {
     current = readFileSync(ignore, 'utf8');
   } catch {}
-  if (!current.includes('ai-usage.jsonl')) writeFileSync(ignore, IGNORE);
+  if (!current.includes('session.json')) writeFileSync(ignore, IGNORE);
 }
 
 export function saveConfig(root, config) {

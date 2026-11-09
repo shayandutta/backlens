@@ -679,6 +679,22 @@ export function createAI(deps) {
     return startFix(job.issueKey, 1, { reason: job.verdict || job.error || job.notes || 'no usable edits' });
   }
 
+  /**
+   * Replays a recorded read against the running app and keeps the median: a few warm-up runs,
+   * then the measured ones. Used by the MCP tools to check a change an agent made.
+   */
+  async function measure(payload, port, { warmups = WARMUPS, samples = SAMPLES } = {}) {
+    const runner = { id: randomUUID() };
+    for (let i = 0; i < warmups; i++) await replay(runner, payload, port);
+    const out = [];
+    for (let i = 0; i < samples; i++) {
+      const t = await replay(runner, payload, port);
+      if (!t) break;
+      out.push(t);
+    }
+    return out;
+  }
+
   /** Called by the server when a replayed request's trace arrives. */
   function onReplayTrace(trace) {
     const waiter = replayWaiters.get(trace.replayOf);
@@ -710,5 +726,5 @@ export function createAI(deps) {
     return status();
   }
 
-  return { setKey, forgetKey, pullModel, stopPullModel, status, saveSettings, explain, startFix, getFix, send, apply, keep, revert, escalate, stop, onReplayTrace, replayEnabled: () => settings.replay };
+  return { setKey, forgetKey, pullModel, stopPullModel, status, saveSettings, explain, startFix, getFix, send, apply, keep, revert, escalate, stop, onReplayTrace, measure, replayEnabled: () => settings.replay };
 }

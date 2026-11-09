@@ -66,6 +66,33 @@ Set up in **AI settings**, entirely from the dashboard.
 - The local card links to the Ollama download, notices when it runs, suggests the `qwen2.5-coder` size that fits your memory and downloads it with a progress bar.
 - A Claude key is pasted in the dashboard, checked for free, and saved in your user folder (`~/.config/backlens`, readable by you only), never in the project. Haiku explains; Sonnet or Opus fixes, depending on how hard the issue is. The cost is estimated before sending and a daily budget (default $1) is enforced. A typical fix costs about $0.03.
 
+## In your AI editor (MCP)
+
+Let Claude Code, Cursor or any MCP client see what your requests do, change the code, and check the change on the same request.
+
+```
+claude mcp add backlens -- npx -y backlens mcp
+```
+
+Cursor (`.cursor/mcp.json`) and others:
+
+```json
+{ "mcpServers": { "backlens": { "command": "npx", "args": ["-y", "backlens", "mcp", "--root", "${workspaceFolder}"] } } }
+```
+
+Keep `npx backlens` running in the server folder; the MCP server reads that session (it finds it in the project, a folder above, or a few below, like `apps/api`). Tools:
+
+| Tool | What the agent gets |
+|---|---|
+| `status` | is backlens recording, is the app up, traffic and issue counts |
+| `list_issues` | issues worst first, with route, `file:line`, statements, a suggested fix and an example request |
+| `list_routes`, `list_requests` | p50, p95, calls per request; recent requests with ids |
+| `get_request` | the waterfall of one request: each query, Redis and HTTP call, its time and the code behind it |
+| `measure_request` | replays a recorded GET against the code as it is now (warm-up, then median of runs) and compares it with what was recorded |
+| `app_logs`, `restart_app`, `run_tests` | the app's output, a restart, the test script with its issues |
+
+A typical loop: *list_issues → get_request → edit → measure_request → run_tests*. On a sample N+1 that went from 6 queries and 6.7 ms to 2 queries and 1.6 ms, checked by replay. Writes are never replayed, and parameter values never reach the agent.
+
 ## In CI: fail the build on new issues
 
 ```
@@ -126,7 +153,7 @@ Redis passwords never show: `AUTH`, `HELLO` and similar commands are recorded by
 ## Privacy and safety
 
 - **Values never leave your app.** Query parameters and results become short hashes; emails, IPs and ids in Redis keys are masked.
-- **The dashboard is yours only.** It listens on 127.0.0.1, needs the private token in the link it prints, and refuses requests from other websites.
+- **The dashboard is yours only.** It listens on 127.0.0.1, needs the private token in the link it prints, and refuses requests from other websites. For `backlens mcp`, the token is kept in `.backlens/session.json`, readable by you only, ignored by git, and deleted when backlens stops.
 - **It runs only scripts from your `package.json`,** by name.
 - **Files change only when you click Apply,** with a copy kept first. Revert never overwrites edits you made afterwards.
 - **AI sees only what the preview shows.** Secret-looking values are masked; `.env` and `node_modules` are never read.

@@ -19,7 +19,8 @@
     "report.js",
     "config.js",
     "runner.js",
-    "ui.html"
+    "ui.html",
+    "mcp.js"
   ],
   "engines": {
     "node": ">=20"

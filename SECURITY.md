@@ -11,6 +11,7 @@ Include the version (`npm ls backlens`), what an attacker needs (for example: an
 ## What backlens is designed to protect
 
 - The dashboard listens on 127.0.0.1 only, needs the private token from the link it prints, checks the Host header and refuses requests from other origins.
+- While it runs, the dashboard's port and token are in `.backlens/session.json` (owner-only permissions, git-ignored, removed on exit) so `backlens mcp` can reach it. The MCP server only reads that dashboard; it never receives query parameters or results.
 - It only runs scripts from your `package.json`, by name.
 - Query parameters and results are never sent to the dashboard, only short hashes.
 - A Claude API key is stored in your user config folder with owner-only permissions and is never sent back to the browser.

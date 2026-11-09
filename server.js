@@ -344,6 +344,45 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
       tests.start(scriptCommand(pm, config.test), root);
       return json(res, 200, { ok: true });
     }
+    // Replays a recorded read against the app as it runs now and compares it with what was
+    // recorded: what an agent uses (through backlens mcp) to check its own change.
+    if (req.method === 'POST' && url.pathname === '/api/measure') {
+      const body = await readJson(req);
+      const id = body && typeof body.id === 'string' ? body.id : '';
+      const original = traces.find((t) => t.id === id);
+      if (!original) return json(res, 404, { error: 'No recorded request with that id. List recent requests first.' });
+      const payload = replays.get(id);
+      if (!payload) return json(res, 400, { error: ai && ai.replayEnabled() ? 'This request cannot be replayed (its body was too large, or it was recorded before replay was on).' : 'Replay is off in AI settings.' });
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(payload.method)) return json(res, 400, { error: `${payload.method} changes data, so backlens does not replay it here. Measure a read on the same route instead.` });
+      const runs = Math.min(20, Math.max(1, Number(body.runs) || 5));
+      let port = app.port;
+      for (let i = 0; !port && app.child && i < 240; i++) {
+        await new Promise((r) => setTimeout(r, 250));
+        port = app.port;
+      }
+      if (!port) return json(res, 409, { error: 'The app is not running. Start it (restart_app) and try again.' });
+      const samples = await ai.measure(payload, port, { samples: runs });
+      if (!samples.length) return json(res, 504, { error: 'The replayed request did not finish within 20 s. Check the app logs.' });
+      const route = routeOf(original.method, original.url, original.template);
+      const since = fixedAt.get(`route:${route}`) || 0;
+      const recorded = traces.filter((t) => t.at > since && !t.afterFix && routeOf(t.method, t.url, t.template) === route && t.status === original.status).slice(-runs);
+      const count = (t, kind) => t.spans.filter((x) => x.kind === kind).length;
+      const median = (list) => {
+        const v = list.map((t) => t.duration).sort((a, b) => a - b);
+        return v.length ? Math.round(v[Math.floor((v.length - 1) / 2)] * 100) / 100 : null;
+      };
+      const describe = (list, last) => ({ runs: list.length, ms: median(list), status: last.status, queries: count(last, 'db'), redis: count(last, 'redis'), http: count(last, 'http') });
+      const last = samples.at(-1);
+      const seen = new Map();
+      for (const t of samples) for (const i of checkTrace(t)) if (!seen.has(i.title)) seen.set(i.title, { type: i.type, title: i.title, sites: i.sites, sql: i.sql });
+      return json(res, 200, {
+        route,
+        recorded: recorded.length ? describe(recorded, recorded.at(-1)) : null,
+        now: describe(samples, last),
+        issues: [...seen.values()],
+        trace: { ...last, route },
+      });
+    }
     // Creating a suggested index on the database the app is using, through the app itself.
     if (req.method === 'POST' && url.pathname.startsWith('/api/index/')) {
       const action = url.pathname.slice('/api/index/'.length);

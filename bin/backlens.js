@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { ensureIgnore } from '../config.js';
 import { fileURLToPath } from 'node:url';
 import { format, judge, readBaseline, writeBaseline } from '../report.js';
 import { startServer } from '../server.js';
@@ -14,6 +15,10 @@ const HELP = `usage:
 
   backlens [--port 7777] -- <command>
       Same, but run this exact command as the app.
+
+  backlens mcp [--root <project folder>]
+      For AI editors (Claude Code, Cursor...): an MCP server over stdio that reads the
+      running dashboard for this project: issues, requests, replays, logs and tests.
 
   backlens test [--baseline file] [--update-baseline] [--strict] [--json file] -- <test command>
       For CI: run your tests, print the report, exit 1 on new issues.
@@ -38,7 +43,8 @@ const bold = (s) => `\x1b[1m${s}\x1b[0m`;
 const token = randomBytes(16).toString('hex');
 const root = process.cwd();
 
-if (testMode) await runTests();
+if (own[0] === 'mcp') await import('../mcp.js').then((m) => m.runMcp({ cwd: root, args: own.slice(1) }));
+else if (testMode) await runTests();
 else await runStudio();
 
 async function runStudio() {
@@ -66,6 +72,21 @@ async function runStudio() {
   process.stderr.write(`${bold('backlens')} dashboard ${bold(link)}\n${dim('         keep this link private: it controls your app. Ctrl+C stops everything.')}\n\n`);
   if (!own.includes('--no-open')) openBrowser(link);
   server.startApp();
+
+  // How `backlens mcp` finds this dashboard: the port and token, readable by this user only,
+  // in .backlens/ (which backlens keeps out of git). Removed when backlens stops.
+  const sessionFile = join(root, '.backlens', 'session.json');
+  try {
+    mkdirSync(join(root, '.backlens'), { recursive: true });
+    ensureIgnore(root);
+    writeFileSync(sessionFile, `${JSON.stringify({ port: server.address().port, token, pid: process.pid, root, startedAt: Date.now() })}\n`, { mode: 0o600 });
+    chmodSync(sessionFile, 0o600);
+  } catch {}
+  process.on('exit', () => {
+    try {
+      rmSync(sessionFile, { force: true });
+    } catch {}
+  });
 
   let stopping = false;
   const stop = async () => {
