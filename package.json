@@ -1,6 +1,6 @@
 {
   "name": "backlens",
-  "version": "0.2.6",
+  "version": "0.3.0",
   "description": "Run your Node backend through backlens and see every request, every query, and what is wrong with them.",
   "license": "MIT",
   "type": "module",
