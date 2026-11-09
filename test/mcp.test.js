@@ -69,6 +69,7 @@ test('an editor can list issues and read a request through backlens mcp, without
     assert.equal(init.result.protocolVersion, '2025-06-18');
     const { tools } = (await mcp.rpc('tools/list', {})).result;
     assert.ok(tools.some((t) => t.name === 'measure_request'));
+    assert.ok(tools.some((t) => t.name === 'usage'));
 
     const issues = await mcp.tool('list_issues');
     assert.ok(!issues.isError, issues.content[0].text);

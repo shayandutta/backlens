@@ -20,7 +20,8 @@
     "config.js",
     "runner.js",
     "ui.html",
-    "mcp.js"
+    "mcp.js",
+    "agent-usage.js"
   ],
   "engines": {
     "node": ">=20"

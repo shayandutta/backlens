@@ -267,6 +267,7 @@
     <button role="tab" data-tab="requests" aria-selected="false">Requests</button>
     <button role="tab" data-tab="tests" aria-selected="false">Tests<span class="count" id="test-count" hidden></span></button>
     <button role="tab" data-tab="compare" aria-selected="false">Compare</button>
+    <button role="tab" data-tab="agents" aria-selected="false">Agents</button>
   </nav>
   <span class="spacer"></span>
   <span class="live idle" id="live"><i></i><span id="live-text">waiting for requests</span></span>
@@ -412,6 +413,31 @@ function renderCompare() {
       <td class="n">${delta(b.queries, n.queries, '')}</td><td class="n">${delta(b.redis, n.redis, '')}</td>
       <td class="n" title="${(b.calls || 0) < 5 || (n.calls || 0) < 5 ? 'Too few calls on one side to call this a change.' : ''}">${delta(b.p50 === undefined ? undefined : Math.round(b.p50 * 10) / 10, n.p50 === undefined ? undefined : Math.round(n.p50 * 10) / 10, ' ms', 1, (b.calls || 0) < 5 || (n.calls || 0) < 5 ? 'few' : true)}</td>
       <td class="n">${delta(b.issues, n.issues, '', 0)}</td></tr>`; }).join('')}</tbody></table>`;
+}
+
+let agentUsage = null;
+async function loadAgentUsage() {
+  const res = await api('/api/agent-usage');
+  agentUsage = res.ok ? await res.json() : { prompts: [], sessions: [], days: 30, error: true };
+}
+const kTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(n));
+const cost = (n) => (n === null || n === undefined ? '?' : n < 0.01 ? '$' + n.toFixed(4) : '$' + n.toFixed(2));
+const secs = (s) => (s < 90 ? s + ' s' : Math.round(s / 60) + ' min');
+
+function renderAgents() {
+  const u = agentUsage;
+  if (!u) return '<div class="empty"><b>Reading Claude Code logs…</b></div>';
+  if (!u.prompts.length)
+    return `<div class="empty"><b>No agent work yet</b>When Claude Code uses backlens through <code>backlens mcp</code>, each prompt shows here with its tokens, cost and backlens calls, read from Claude Code's own logs (counts only, never your prompts or code). Last ${u.days} days.</div>`;
+  const total = u.prompts.reduce((n, t) => n + (t.usd || 0), 0);
+  const [last] = u.prompts;
+  const w = last.without;
+  const tools = (t) => Object.entries(t.backlensTools).map(([n, c]) => `${esc(n)}${c > 1 ? ' ×' + c : ''}`).join(', ');
+  return `<div class="chips" style="margin:4px 0 14px"><span class="chip">${u.prompts.length} prompts</span><span class="chip">${cost(total)} in ${u.days} days</span><span class="chip">${u.sessions.length} sessions</span></div>
+  ${w ? `<p class="note"><b>Without backlens (estimate, latest prompt).</b> Finding these issues by reading code means going through up to ${kTok(w.sourceTokens)} tokens of source in ${w.sourceFiles} files. backlens handed the agent ${kTok(w.findingsTokens)}: <b>${Math.round(w.contextSaved * 100)}% less to read</b>${w.minExtraUsd ? `, at least ${cost(w.minExtraUsd)} more otherwise` : ''}. Reading code also gives no query counts or timings, so a fix can't be proven.</p>` : ''}
+  <table><thead><tr><th>when</th><th class="n">cost</th><th class="n">tokens</th><th class="n">written</th><th class="n">time</th><th>backlens calls</th><th class="n">reads</th><th class="n">edits</th><th>model</th></tr></thead>
+  <tbody>${u.prompts.map((t) => `<tr><td>${esc(new Date(t.start).toLocaleString())}</td><td class="n">${cost(t.usd)}</td><td class="n" title="cache reads ${t.tokens.cacheRead.toLocaleString()}, cache writes ${t.tokens.cacheWrite.toLocaleString()}, input ${t.tokens.input.toLocaleString()}">${kTok(t.tokens.total)}</td><td class="n">${kTok(t.tokens.output)}</td><td class="n">${secs(t.seconds)}</td><td>${t.backlensCalls}: <span class="muted">${tools(t)}</span></td><td class="n">${t.fileReads}</td><td class="n">${t.edits}</td><td class="muted">${esc(t.models.join(', '))}</td></tr>`).join('')}</tbody></table>
+  <p class="note">One row per Claude Code prompt that called backlens, read from <code>~/.claude/projects</code>: token counts and tool names only. Costs use Anthropic API list prices; on a Claude subscription this counts against plan limits instead. Other editors keep no such logs.</p>`;
 }
 
 function renderSetup() {
@@ -1006,7 +1032,7 @@ function render() {
   tc.textContent = newIssues;
   if (showSetup || (cfg && cfg.needsSetup)) { $('#view').innerHTML = renderSetup(); return; }
   if (tab === 'map') { $('#view').innerHTML = renderMap(); requestAnimationFrame(drawWires); return; }
-  $('#view').innerHTML = tab === 'routes' ? renderRoutes() : tab === 'issues' ? renderIssues() : tab === 'compare' ? renderCompare() : tab === 'tests' ? renderTests() : renderRequests();
+  $('#view').innerHTML = tab === 'routes' ? renderRoutes() : tab === 'issues' ? renderIssues() : tab === 'compare' ? renderCompare() : tab === 'agents' ? renderAgents() : tab === 'tests' ? renderTests() : renderRequests();
 }
 
 function renderDetail() {
@@ -1056,7 +1082,7 @@ async function openRequest(id) {
 
 document.addEventListener('click', (e) => {
   const t = e.target.closest('[data-tab]');
-  if (t) { tab = t.dataset.tab; if (tab !== 'requests') routeFilter = null; if (tab === 'compare') loadSnapshots().then(render); render(); return; }
+  if (t) { tab = t.dataset.tab; if (tab !== 'requests') routeFilter = null; if (tab === 'compare') loadSnapshots().then(render); if (tab === 'agents') loadAgentUsage().then(render); render(); return; }
   if (e.target.closest('#snap-save')) {
     const name = $('#snap-name').value.trim() || 'snapshot-' + new Date().toISOString().slice(11, 19).replace(/:/g, '');
     api('/api/snapshot?name=' + encodeURIComponent(name), { method: 'POST' }).then(loadSnapshots).then(() => { compareTo = snapshots[0] && snapshots[0].name; render(); });

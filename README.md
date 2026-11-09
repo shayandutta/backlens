@@ -91,8 +91,23 @@ Keep `npx backlens` running in the server folder; the MCP server reads that sess
 | `measure_request` | replays a recorded GET against the code as it is now (warm-up, then median of runs) and compares it with what was recorded |
 | `measure_url` | the same for a path sent as a plain GET (no cookies): public routes, or a before when nothing is recorded yet |
 | `app_logs`, `restart_app`, `run_tests` | the app's output, a restart, the test script with its issues |
+| `usage` | what the work cost: tokens and dollars for this prompt, the session and the last 30 days |
 
 A typical loop: *list_issues → get_request → measure (before) → edit → measure again → run_tests*. On a sample N+1 that went from 6 queries and 6.7 ms to 2 queries and 1.6 ms, checked by replay. Writes are never replayed, and parameter values never reach the agent.
+
+### What it costs
+
+The **Agents** tab lists every Claude Code prompt that used backlens: tokens, cost, time, backlens calls, files read and edits. The agent can report the same with `usage`. backlens reads these from Claude Code's own logs in `~/.claude/projects`: counts and tool names only, never your prompts or code. Costs are at Anthropic API list prices; on a Claude subscription they count against your plan instead.
+
+One real run, a 59-file NestJS API, one prompt with no file names in it:
+
+```
+3 issues found and fixed, tests green          2.5 min, $0.61 (Opus 5.5)
+backlens calls 10, files read 3, edits 4
+backlens handed the agent 5k tokens instead of up to 40k of source: 88% less to read
+```
+
+The "without backlens" figure is an estimate: the size of the app's source an agent would have to search, against what backlens gave it. Reading code also can't count queries or time them, so it can't prove a fix.
 
 ## In CI: fail the build on new issues
 
@@ -120,6 +135,7 @@ backlens: 2 new issues. Fix them, or accept with --update-baseline.
 - **Requests**: a waterfall of any request, with the code behind each call.
 - **Tests**: run your test script and see what it hit.
 - **Compare**: snapshot, change code, compare per route.
+- **Agents**: what each Claude Code prompt that used backlens cost.
 
 Start, stop, restart and read your app's logs from the same page.
 
@@ -159,6 +175,7 @@ Redis passwords never show: `AUTH`, `HELLO` and similar commands are recorded by
 - **Files change only when you click Apply,** with a copy kept first. Revert never overwrites edits you made afterwards.
 - **AI sees only what the preview shows.** Secret-looking values are masked; `.env` and `node_modules` are never read.
 - **Replaying writes is off by default,** since it changes your dev database again.
+- **Agent costs come from counts only.** The Agents tab and `usage` read token counts and tool names from Claude Code's logs on your machine; prompts, code and replies are skipped.
 - **Indexes are built from checked table and column names** through your app's own connection: backlens never sees a database password.
 
 ## How it works

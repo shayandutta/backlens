@@ -10,6 +10,7 @@
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import http from 'node:http';
+import { agentUsage, usageText } from './agent-usage.js';
 import { dirname, join, relative, resolve } from 'node:path';
 
 const VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
@@ -213,6 +214,13 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
+  {
+    name: 'usage',
+    description:
+      'What this work cost in Claude Code: tokens and dollars for the current prompt, the session and the last 30 days of prompts that used backlens, and an estimate of what finding the same issues by reading code would take. Call it last, and end your report with its first line.',
+    inputSchema: { type: 'object', properties: {} },
+    annotations: { readOnlyHint: true },
+  },
 ];
 
 const sleep = (t) => new Promise((r) => setTimeout(r, t));
@@ -220,6 +228,8 @@ const sleep = (t) => new Promise((r) => setTimeout(r, t));
 async function call(name, args, cwd) {
   const sessions = findSessions(cwd);
   const session = sessions[0];
+  // Read from Claude Code's own logs, so it works with the dashboard closed too.
+  if (name === 'usage') return usageText(await agentUsage({ root: session ? session.root : cwd }), { current: true });
   if (!session) throw new Error(NOT_RUNNING);
   const where = relative(cwd, session.root) || '.';
 
@@ -353,7 +363,7 @@ export async function runMcp({ cwd = process.cwd(), args = [] } = {}) {
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: 'backlens', version: VERSION },
         instructions:
-          'backlens records what each request to the local app does (SQL, Redis, outgoing HTTP, with the code line behind each call) and finds N+1 queries, repeated calls, serial awaits and missing indexes. Typical loop: status, list_issues, get_request on the example; measure the request BEFORE changing code (measure_request on a request recorded from the app, or measure_url for a public route), change the code (backlens restarts the app on file changes), measure the same thing again to confirm the issue is gone and it got faster, then run_tests. Requests from run_tests can be read with get_request but not replayed: measure_url, or a page opened in the app, gives something to replay.',
+          'backlens records what each request to the local app does (SQL, Redis, outgoing HTTP, with the code line behind each call) and finds N+1 queries, repeated calls, serial awaits and missing indexes. Typical loop: status, list_issues, get_request on the example; measure the request BEFORE changing code (measure_request on a request recorded from the app, or measure_url for a public route), change the code (backlens restarts the app on file changes), measure the same thing again to confirm the issue is gone and it got faster, then run_tests. Requests from run_tests can be read with get_request but not replayed: measure_url, or a page opened in the app, gives something to replay. When you finish, call usage and end your report with its first line, so the user sees what the work cost.',
       });
     }
     if (method === 'ping') return isRequest && reply(id, {});

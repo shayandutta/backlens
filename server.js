@@ -8,6 +8,7 @@ import { loadConfig, packageManager, readProject, saveConfig, scriptCommand } fr
 import { judge, stableKey } from './report.js';
 import { Runner } from './runner.js';
 import { createAI } from './ai/fixes.js';
+import { agentUsage, withoutBacklens } from './agent-usage.js';
 
 const KEEP = 1000;
 const KEEP_TEST = 5000;
@@ -299,6 +300,10 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
       return json(res, 200, { snapshots: list });
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/agent-usage') {
+      const u = await agentUsage({ root });
+      return json(res, 200, { ...u, prompts: u.prompts.map((t) => ({ ...t, without: withoutBacklens(t, u.source) })) });
+    }
     if (req.method === 'GET' && url.pathname === '/api/config') {
       const project = readProject(root);
       return json(res, 200, { project: project.name, root, pm, scripts: project.scripts, config, needsSetup: !manualArgv && !config, manual: manualArgv ? manualArgv.join(' ') : null });
