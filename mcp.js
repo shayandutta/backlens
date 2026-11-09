@@ -228,9 +228,16 @@ async function call(name, args, cwd) {
 
   if (name === 'list_issues') {
     const { issues, total } = await api(session, 'GET', '/api/state');
-    const list = args.route ? issues.filter((i) => i.route === args.route) : issues;
-    if (!list.length) return total ? `No issues${args.route ? ` on ${args.route}` : ''} in ${plural(total, 'recorded request')}.` : 'Nothing recorded yet: use the app so backlens sees real requests.';
-    return `${plural(list.length, 'issue')}, worst first:\n\n${list.map((i, n) => issueText(i, n + 1)).join('\n\n')}`;
+    const pick = (all) => (args.route ? all.filter((i) => i.route === args.route) : all);
+    const list = pick(issues);
+    if (list.length) return `${plural(list.length, 'issue')} in app traffic, worst first:\n\n${list.map((i, n) => issueText(i, n + 1)).join('\n\n')}`;
+    // No app traffic with issues: the last test run's traffic is the next best thing.
+    const { report } = await api(session, 'GET', '/api/tests?since=999999999');
+    const fromTests = report ? pick(report.issues) : [];
+    if (fromTests.length)
+      return `${plural(fromTests.length, 'issue')} in the last test run's traffic (${plural(report.requests, 'request')}), worst first. Their example requests came from tests: get_request reads them; measure_request needs a request recorded from the running app.\n\n${fromTests.map((i, n) => `${issueText(i, n + 1)}${i.isNew ? '\n   new: not in backlens.baseline.json' : ''}`).join('\n\n')}`;
+    if (total || report) return `No issues${args.route ? ` on ${args.route}` : ''} in ${plural(total, 'recorded request')}${report ? ` or in the last test run (${plural(report.requests, 'request')})` : ''}.`;
+    return 'Nothing recorded yet: use the app, or call run_tests, so backlens sees real requests.';
   }
 
   if (name === 'list_routes') {
@@ -303,7 +310,7 @@ async function call(name, args, cwd) {
           `tests ${r.exitCode === 0 ? 'passed' : `failed (exit ${r.exitCode})`}: ${plural(r.requests, 'request')} to the app, ${plural(r.queries, 'query')}, ${r.routesCalled} of ${r.routesKnown} routes called`,
           `issues in test traffic: ${r.issues.length}, ${r.failing} new (not in backlens.baseline.json)`,
         ];
-        if (r.issues.length) out.push('', ...r.issues.map((x, n) => `${n + 1}. ${x.title}  ${x.route}${x.sites && x.sites.length ? `  (${x.sites.join(' -> ')})` : ''}`));
+        if (r.issues.length) out.push('', ...r.issues.map((x, n) => `${issueText(x, n + 1)}${x.isNew ? '\n   new: not in backlens.baseline.json' : ''}`).join('\n\n').split('\n'));
         if (r.exitCode !== 0) out.push('', 'Test output (end):', ...t.lines.slice(-40).map((l) => l.text));
         return out.join('\n');
       }
