@@ -35,7 +35,7 @@ test('reads what each prompt that used backlens cost, from Claude Code logs, wit
     ];
     writeFileSync(join(dir, 'S.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\nnot json\n');
 
-    const u = await agentUsage({ root, projects });
+    const u = await agentUsage({ root, projects, plan: { kind: 'api' }, limits: [] });
     assert.equal(u.prompts.length, 1);
     const [p] = u.prompts;
     assert.equal(p.tokens.cacheRead, 300000, 'three responses, not four log lines');
@@ -50,7 +50,23 @@ test('reads what each prompt that used backlens cost, from Claude Code logs, wit
     assert.ok(!JSON.stringify(u).includes('secret'), 'no prompt or reply text is returned');
 
     const text = usageText(u, { current: true });
-    assert.match(text, /^This prompt so far: \$0\.\d+, 305k tokens/);
+    assert.match(text, /^This prompt so far: \$0\.\d+; 305k tokens/);
+
+    // On a Claude plan the prompt costs part of its limits, read from what the status line recorded.
+    const start = Date.parse(u.prompts[0].start);
+    const limits = [
+      { at: start - 60e3, five: 10, fiveResets: 1, seven: 3, sevenResets: 9 },
+      { at: start + 30e3, five: 13, fiveResets: 1, seven: 3, sevenResets: 9 },
+      { at: start + 70e3, five: 14, fiveResets: 1, seven: 4, sevenResets: 9 },
+    ];
+    const pro = await agentUsage({ root, projects, plan: { kind: 'plan', name: 'Pro', extraUsage: false }, limits });
+    assert.deepEqual(pro.prompts[0].limits, { five: 4, seven: 1 });
+    const proText = usageText(pro, { current: true });
+    assert.match(proText, /^This prompt so far: 4% of your 5-hour limit, 1% of the week; 305k tokens/);
+    assert.match(proText, /Billing: Claude Pro plan, a flat fee, nothing billed per prompt\. At API prices this prompt would be \$0\.\d+/);
+    const unrecorded = usageText(await agentUsage({ root, projects, plan: { kind: 'plan', name: 'Pro' }, limits: [] }));
+    assert.match(unrecorded, /limit use not recorded/);
+    assert.match(unrecorded, /backlens statusline --install/);
     assert.match(text, /backlens handed over 1k \(90% less to read/);
   } finally {
     rmSync(base, { recursive: true, force: true });

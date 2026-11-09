@@ -21,7 +21,8 @@
     "runner.js",
     "ui.html",
     "mcp.js",
-    "agent-usage.js"
+    "agent-usage.js",
+    "statusline.js"
   ],
   "engines": {
     "node": ">=20"

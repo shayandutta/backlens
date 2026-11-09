@@ -97,12 +97,27 @@ A typical loop: *list_issues → get_request → measure (before) → edit → m
 
 ### What it costs
 
-The **Agents** tab lists every Claude Code prompt that used backlens: tokens, cost, time, backlens calls, files read and edits. The agent can report the same with `usage`. backlens reads these from Claude Code's own logs in `~/.claude/projects`: counts and tool names only, never your prompts or code. Costs are at Anthropic API list prices; on a Claude subscription they count against your plan instead.
+The **Agents** tab lists every Claude Code prompt that used backlens, with what it used, its tokens, time, backlens calls, files read and edits. The agent reports the same at the end with `usage`. Token counts come from Claude Code's own logs in `~/.claude/projects`: counts and tool names only, never your prompts or code.
+
+What "cost" means depends on how you pay, and backlens shows the number that is really yours:
+
+| You pay with | backlens shows | From |
+|---|---|---|
+| A Claude plan (Pro, Max, Team) | the share of your 5-hour and weekly limits the prompt used, like `4% of your 5-hour limit` | Claude Code itself, the same numbers as `/usage` |
+| An API key | dollars | token counts × Anthropic's API prices, which is that bill |
+
+On a plan, the API price is shown next to it only for comparison. Plans need this once:
+
+```
+npx backlens statusline --install
+```
+
+Claude Code hands its status line your plan's limit use on every update, so backlens sits in front of the status line you already have (it keeps printing exactly what it did), saves only those two percentages to `~/.config/backlens`, and passes everything on. `--uninstall` puts your old status line back. The share covers all your Claude use while the prompt ran, chats included.
 
 One real run, a 59-file NestJS API, one prompt with no file names in it:
 
 ```
-3 issues found and fixed, tests green          2.5 min, $0.61 (Opus 5.5)
+3 issues found and fixed, tests green          2.5 min, 804k tokens (Opus 5.5, $0.61 at API prices)
 backlens calls 10, files read 3, edits 4
 backlens handed the agent 5k tokens instead of up to 40k of source: 88% less to read
 ```
@@ -175,7 +190,7 @@ Redis passwords never show: `AUTH`, `HELLO` and similar commands are recorded by
 - **Files change only when you click Apply,** with a copy kept first. Revert never overwrites edits you made afterwards.
 - **AI sees only what the preview shows.** Secret-looking values are masked; `.env` and `node_modules` are never read.
 - **Replaying writes is off by default,** since it changes your dev database again.
-- **Agent costs come from counts only.** The Agents tab and `usage` read token counts and tool names from Claude Code's logs on your machine; prompts, code and replies are skipped.
+- **Agent costs come from counts only.** The Agents tab and `usage` read token counts and tool names from Claude Code's logs on your machine; prompts, code and replies are skipped. `backlens statusline` keeps only your plan's two limit percentages.
 - **Indexes are built from checked table and column names** through your app's own connection: backlens never sees a database password.
 
 ## How it works

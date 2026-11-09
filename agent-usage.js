@@ -7,6 +7,7 @@ import { createReadStream, existsSync, readdirSync, readFileSync, statSync } fro
 import { homedir } from 'node:os';
 import { dirname, extname, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { limitUsed, readLimits } from './statusline.js';
 
 // USD per million tokens: input, output, cache read. Cache writes are 1.25x input (5 minutes) or 2x (1 hour).
 // Longest prefix wins. Unknown models get token counts but no cost.
@@ -37,6 +38,25 @@ export function usageCost(model, u) {
   const w5m = u.cache_creation ? u.cache_creation.ephemeral_5m_input_tokens || 0 : u.cache_creation_input_tokens || 0;
   const usd = ((u.input_tokens || 0) * p.in + w5m * p.in * 1.25 + w1h * p.in * 2 + (u.cache_read_input_tokens || 0) * p.cacheRead + (u.output_tokens || 0) * p.out) / 1e6;
   return u.speed === 'fast' ? usd * 2 : usd;
+}
+
+const PLANS = { claude_pro: 'Pro', claude_max: 'Max', claude_team: 'Team', claude_enterprise: 'Enterprise' };
+
+/**
+ * How this machine's Claude Code is paid for, from its own config: a Claude plan (flat fee, with 5-hour and
+ * weekly limits) or per token. Only the plan fields are read.
+ */
+export function planOf(file = process.env.CLAUDE_CONFIG_DIR ? join(process.env.CLAUDE_CONFIG_DIR, '.claude.json') : join(homedir(), '.claude.json')) {
+  let account;
+  try {
+    account = JSON.parse(readFileSync(file, 'utf8')).oauthAccount;
+  } catch {
+    return { kind: 'unknown' };
+  }
+  if (!account) return { kind: 'api' };
+  const name = PLANS[account.organizationType];
+  if (!name) return { kind: 'unknown' };
+  return { kind: 'plan', name, extraUsage: Boolean(account.hasExtraUsageEnabled) };
 }
 
 const encode = (path) => path.replace(/[^a-zA-Z0-9]/g, '-');
@@ -182,7 +202,7 @@ export function sourceTokens(root, limit = 20000) {
  * Prompts in the last `days` in which an agent called a backlens tool, newest first, with totals per session
  * and an estimate of what the same work needs without backlens.
  */
-export async function agentUsage({ root, days = 30, projects } = {}) {
+export async function agentUsage({ root, days = 30, projects, plan = planOf(), limits = readLimits() } = {}) {
   const since = Date.now() - days * 864e5;
   const files = [];
   for (const dir of transcriptDirs(root, projects)) {
@@ -214,13 +234,19 @@ export async function agentUsage({ root, days = 30, projects } = {}) {
       edits: (t.tools.Edit || 0) + (t.tools.Write || 0) + (t.tools.MultiEdit || 0),
       otherCalls: other.reduce((n, [, c]) => n + c, 0),
       findingsTokens: findings,
+      // Percentage points of the Claude plan's limits this prompt used, when the status line recorded them.
+      limits: { five: limitUsed(limits, Date.parse(t.start), Date.parse(t.end), 'five'), seven: limitUsed(limits, Date.parse(t.start), Date.parse(t.end), 'seven') },
     };
   });
 
   const sessions = new Map();
   for (const t of view) {
-    const s = sessions.get(t.session) || { session: t.session, prompts: 0, usd: 0, tokens: 0, backlensCalls: 0, first: t.start, last: t.start };
+    const s = sessions.get(t.session) || { session: t.session, prompts: 0, usd: 0, tokens: 0, backlensCalls: 0, first: t.start, last: t.start, five: 0, fiveKnown: 0 };
     s.prompts++;
+    if (t.limits.five !== null) {
+      s.five += t.limits.five;
+      s.fiveKnown++;
+    }
     s.usd += t.usd || 0;
     s.tokens += t.tokens.total;
     s.backlensCalls += t.backlensCalls;
@@ -228,7 +254,7 @@ export async function agentUsage({ root, days = 30, projects } = {}) {
     if (t.start > s.last) s.last = t.start;
     sessions.set(t.session, s);
   }
-  return { days, prompts: view, sessions: [...sessions.values()], source };
+  return { days, plan, recording: limits.length > 0, prompts: view, sessions: [...sessions.values()], source };
 }
 
 // ---- words --------------------------------------------------------------------------------
@@ -249,8 +275,14 @@ export function withoutBacklens(prompt, source) {
 
 const count = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
-export function promptLine(t) {
-  return `${usdText(t.usd)}, ${kTokens(t.tokens.total)} tokens (${kTokens(t.tokens.output)} written), ${t.seconds < 90 ? `${t.seconds} s` : `${Math.round(t.seconds / 60)} min`}, ${count(t.backlensCalls, 'backlens call')}, ${count(t.fileReads, 'file read')}, ${count(t.edits, 'edit')}`;
+
+const pct = (n) => (n < 1 ? 'under 1%' : `${Math.round(n)}%`);
+
+/** What a prompt really cost the user: plan limits on a Claude plan, dollars when paying per token. */
+export function costLine(t, plan) {
+  if (plan.kind !== 'plan') return usdText(t.usd);
+  if (t.limits.five === null) return `${plan.name} plan, limit use not recorded`;
+  return `${pct(t.limits.five)} of your 5-hour limit${t.limits.seven !== null ? `, ${pct(t.limits.seven)} of the week` : ''}`;
 }
 
 export function usageText(u, { current } = {}) {
@@ -258,17 +290,24 @@ export function usageText(u, { current } = {}) {
   const [last] = u.prompts;
   const session = u.sessions.find((s) => s.session === last.session);
   const all = u.prompts.reduce((n, t) => n + (t.usd || 0), 0);
-  const out = [
-    `${current ? 'This prompt so far' : 'Latest prompt'}: ${promptLine(last)}${last.models.length ? ` (${last.models.join(', ')})` : ''}.`,
-    `This session: ${usdText(session.usd)} over ${count(session.prompts, 'prompt')} that used backlens.`,
-    `Last ${u.days} days: ${usdText(all)} over ${count(u.prompts.length, 'prompt')}.`,
-  ];
+  const onPlan = u.plan.kind === 'plan';
+  const work = `${kTokens(last.tokens.total)} tokens (${kTokens(last.tokens.output)} written), ${last.seconds < 90 ? `${last.seconds} s` : `${Math.round(last.seconds / 60)} min`}, ${count(last.backlensCalls, 'backlens call')}, ${count(last.fileReads, 'file read')}, ${count(last.edits, 'edit')}`;
+  const out = [`${current ? 'This prompt so far' : 'Latest prompt'}: ${costLine(last, u.plan)}; ${work}${last.models.length ? ` (${last.models.join(', ')})` : ''}.`];
+  if (onPlan) {
+    out.push(
+      `Billing: Claude ${u.plan.name} plan, a flat fee${u.plan.extraUsage ? ' (extra usage is on: past the limits it is billed)' : ', nothing billed per prompt'}. At API prices this prompt would be ${usdText(last.usd)}.`,
+    );
+    if (session.fiveKnown) out.push(`This session: ${pct(session.five)} of the 5-hour limit over ${count(session.fiveKnown, 'prompt')} that used backlens.`);
+    if (!u.recording) out.push('Plan limits are not being recorded: run `backlens statusline --install` once to see what each prompt uses.');
+  } else {
+    out.push(`This session: ${usdText(session.usd)} over ${count(session.prompts, 'prompt')} that used backlens.`, `Last ${u.days} days: ${usdText(all)} over ${count(u.prompts.length, 'prompt')}.`);
+  }
   const w = withoutBacklens(last, u.source);
   if (w)
     out.push(
-      `Without backlens (estimate): finding these by reading the code means going through up to ${kTokens(w.sourceTokens)} tokens of source in ${count(w.sourceFiles, 'file')}; backlens handed over ${kTokens(w.findingsTokens)} (${Math.round(w.contextSaved * 100)}% less to read${w.minExtraUsd ? `, at least ${usdText(w.minExtraUsd)} more` : ''}), and reading code gives no query counts or timings to prove a fix.`,
+      `Without backlens (estimate): finding these by reading the code means going through up to ${kTokens(w.sourceTokens)} tokens of source in ${count(w.sourceFiles, 'file')}; backlens handed over ${kTokens(w.findingsTokens)} (${Math.round(w.contextSaved * 100)}% less to read), and reading code gives no query counts or timings to prove a fix.`,
     );
-  out.push('Prices are Anthropic API list prices; on a Claude subscription this counts against plan limits instead.');
+  if (!onPlan) out.push(u.plan.kind === 'api' ? 'Costs at Anthropic API list prices, which is what per-token billing charges.' : 'Costs at Anthropic API list prices; on a Claude plan they count against its limits instead.');
   return out.join('\n');
 }
 

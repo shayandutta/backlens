@@ -20,6 +20,11 @@ const HELP = `usage:
       For AI editors (Claude Code, Cursor...): an MCP server over stdio that reads the
       running dashboard for this project: issues, requests, replays, logs and tests.
 
+  backlens statusline --install | --uninstall
+      For Claude Pro and Max: lets backlens see how much of your plan's 5-hour and weekly
+      limits each prompt uses, through Claude Code's status line. Your own status line
+      keeps running as before. --uninstall puts it back exactly.
+
   backlens test [--baseline file] [--update-baseline] [--strict] [--json file] -- <test command>
       For CI: run your tests, print the report, exit 1 on new issues.
 `;
@@ -43,9 +48,34 @@ const bold = (s) => `\x1b[1m${s}\x1b[0m`;
 const token = randomBytes(16).toString('hex');
 const root = process.cwd();
 
-if (own[0] === 'mcp') await import('../mcp.js').then((m) => m.runMcp({ cwd: root, args: own.slice(1) }));
+if (own[0] === 'statusline') await statusline();
+else if (own[0] === 'mcp') await import('../mcp.js').then((m) => m.runMcp({ cwd: root, args: own.slice(1) }));
 else if (testMode) await runTests();
 else await runStudio();
+
+async function statusline() {
+  const m = await import('../statusline.js');
+  if (own.includes('--uninstall')) {
+    const r = m.uninstall();
+    console.log(r.changed ? `backlens: status line restored${r.restored ? ` to ${r.restored}` : ' (none was set before)'}.` : 'backlens: the status line is not backlens; nothing changed.');
+    return;
+  }
+  if (!own.includes('--install')) {
+    // Run as the status line itself.
+    await m.runStatusline();
+    return;
+  }
+  const r = m.install();
+  if (r.already) {
+    console.log(`backlens: already recording plan limits${r.wrap ? `, and running your status line: ${r.wrap}` : ''}.`);
+    return;
+  }
+  console.log(`backlens: Claude Code's status line now goes through backlens, which records only your plan's 5-hour and weekly limit use.`);
+  console.log(r.wrap ? `  your status line still runs, unchanged: ${dim(r.wrap)}` : '  you had no status line, so it stays empty.');
+  console.log(`  changed: ${dim('statusLine')} in ${dim('~/.claude/settings.json')}. Undo: backlens statusline --uninstall`);
+  if (r.inNpxCache) console.log(`  note: this points into npx's cache, which can be cleared. ${bold('npm i -g backlens')} and install again to keep it.`);
+  console.log('  Takes effect on the next status line update in Claude Code.');
+}
 
 async function runStudio() {
   const chosen = flag('--port');

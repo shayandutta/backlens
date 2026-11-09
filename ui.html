@@ -424,20 +424,28 @@ const kTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1000 ? Math.ro
 const cost = (n) => (n === null || n === undefined ? '?' : n < 0.01 ? '$' + n.toFixed(4) : '$' + n.toFixed(2));
 const secs = (s) => (s < 90 ? s + ' s' : Math.round(s / 60) + ' min');
 
+const pctUsed = (n) => (n === null || n === undefined ? null : n < 1 ? 'under 1%' : Math.round(n) + '%');
+
 function renderAgents() {
   const u = agentUsage;
   if (!u) return '<div class="empty"><b>Reading Claude Code logs…</b></div>';
   if (!u.prompts.length)
-    return `<div class="empty"><b>No agent work yet</b>When Claude Code uses backlens through <code>backlens mcp</code>, each prompt shows here with its tokens, cost and backlens calls, read from Claude Code's own logs (counts only, never your prompts or code). Last ${u.days} days.</div>`;
-  const total = u.prompts.reduce((n, t) => n + (t.usd || 0), 0);
+    return `<div class="empty"><b>No agent work yet</b>When Claude Code uses backlens through <code>backlens mcp</code>, each prompt shows here with what it used, read from Claude Code's own logs (counts only, never your prompts or code). Last ${u.days} days.</div>`;
+  const onPlan = u.plan && u.plan.kind === 'plan';
   const [last] = u.prompts;
   const w = last.without;
   const tools = (t) => Object.entries(t.backlensTools).map(([n, c]) => `${esc(n)}${c > 1 ? ' ×' + c : ''}`).join(', ');
-  return `<div class="chips" style="margin:4px 0 14px"><span class="chip">${u.prompts.length} prompts</span><span class="chip">${cost(total)} in ${u.days} days</span><span class="chip">${u.sessions.length} sessions</span></div>
-  ${w ? `<p class="note"><b>Without backlens (estimate, latest prompt).</b> Finding these issues by reading code means going through up to ${kTok(w.sourceTokens)} tokens of source in ${w.sourceFiles} files. backlens handed the agent ${kTok(w.findingsTokens)}: <b>${Math.round(w.contextSaved * 100)}% less to read</b>${w.minExtraUsd ? `, at least ${cost(w.minExtraUsd)} more otherwise` : ''}. Reading code also gives no query counts or timings, so a fix can't be proven.</p>` : ''}
-  <table><thead><tr><th>when</th><th class="n">cost</th><th class="n">tokens</th><th class="n">written</th><th class="n">time</th><th>backlens calls</th><th class="n">reads</th><th class="n">edits</th><th>model</th></tr></thead>
-  <tbody>${u.prompts.map((t) => `<tr><td>${esc(new Date(t.start).toLocaleString())}</td><td class="n">${cost(t.usd)}</td><td class="n" title="cache reads ${t.tokens.cacheRead.toLocaleString()}, cache writes ${t.tokens.cacheWrite.toLocaleString()}, input ${t.tokens.input.toLocaleString()}">${kTok(t.tokens.total)}</td><td class="n">${kTok(t.tokens.output)}</td><td class="n">${secs(t.seconds)}</td><td>${t.backlensCalls}: <span class="muted">${tools(t)}</span></td><td class="n">${t.fileReads}</td><td class="n">${t.edits}</td><td class="muted">${esc(t.models.join(', '))}</td></tr>`).join('')}</tbody></table>
-  <p class="note">One row per Claude Code prompt that called backlens, read from <code>~/.claude/projects</code>: token counts and tool names only. Costs use Anthropic API list prices; on a Claude subscription this counts against plan limits instead. Other editors keep no such logs.</p>`;
+  const used = (t) => (onPlan ? (t.limits.five === null ? '<span class="muted">not recorded</span>' : `${pctUsed(t.limits.five)}${t.limits.seven !== null ? ` <span class="muted">· ${pctUsed(t.limits.seven)} wk</span>` : ''}`) : cost(t.usd));
+  const totalUsd = u.prompts.reduce((n, t) => n + (t.usd || 0), 0);
+  const billing = onPlan
+    ? `<p class="note"><b>Claude ${esc(u.plan.name)} plan:</b> a flat fee, so prompts are not billed one by one${u.plan.extraUsage ? ' (extra usage is on: past your limits it is billed)' : ''}. What a prompt really costs you is part of your 5-hour and weekly limits, as Claude Code reports them. ${u.recording ? '' : `<b>Not recorded yet:</b> run <code>backlens statusline --install</code> once; prompts after that show their share.`} The API price is shown only for comparison.</p>`
+    : `<p class="note">Costs at Anthropic API list prices${u.plan && u.plan.kind === 'api' ? ', which is what per-token billing charges' : ''}.</p>`;
+  return `<div class="chips" style="margin:4px 0 14px"><span class="chip">${u.prompts.length} prompts in ${u.days} days</span><span class="chip">${u.sessions.length} sessions</span>${onPlan ? `<span class="chip">Claude ${esc(u.plan.name)}</span>` : `<span class="chip">${cost(totalUsd)}</span>`}</div>
+  ${billing}
+  ${w ? `<p class="note"><b>Without backlens (estimate, latest prompt).</b> Finding these issues by reading code means going through up to ${kTok(w.sourceTokens)} tokens of source in ${w.sourceFiles} files. backlens handed the agent ${kTok(w.findingsTokens)}: <b>${Math.round(w.contextSaved * 100)}% less to read</b>. Reading code also gives no query counts or timings, so a fix can't be proven.</p>` : ''}
+  <table><thead><tr><th>when</th><th class="n">${onPlan ? '5-hour limit used' : 'cost'}</th>${onPlan ? '<th class="n">at API prices</th>' : ''}<th class="n">tokens</th><th class="n">written</th><th class="n">time</th><th>backlens calls</th><th class="n">reads</th><th class="n">edits</th><th>model</th></tr></thead>
+  <tbody>${u.prompts.map((t) => `<tr><td>${esc(new Date(t.start).toLocaleString())}</td><td class="n">${used(t)}</td>${onPlan ? `<td class="n muted">${cost(t.usd)}</td>` : ''}<td class="n" title="cache reads ${t.tokens.cacheRead.toLocaleString()}, cache writes ${t.tokens.cacheWrite.toLocaleString()}, input ${t.tokens.input.toLocaleString()}">${kTok(t.tokens.total)}</td><td class="n">${kTok(t.tokens.output)}</td><td class="n">${secs(t.seconds)}</td><td>${t.backlensCalls}: <span class="muted">${tools(t)}</span></td><td class="n">${t.fileReads}</td><td class="n">${t.edits}</td><td class="muted">${esc(t.models.join(', '))}</td></tr>`).join('')}</tbody></table>
+  <p class="note">One row per Claude Code prompt that called backlens, read from <code>~/.claude/projects</code>: token counts and tool names only.${onPlan ? ' Limit use comes from Claude Code\'s status line and covers all your Claude use in that time, chats included.' : ''} Other editors keep no such logs.</p>`;
 }
 
 function renderSetup() {
