@@ -169,3 +169,34 @@ server.listen(0, () => process.send(server.address().port));`;
   assert.equal(new Set(spans.map((s) => s.params)).size, 3, 'each call is told apart by its arguments');
   assert.ok(!JSON.stringify(traces).includes('secret@example.com'));
 });
+
+test('a wrapper around pool.query that does not await is skipped for the code that awaited it', async () => {
+  // A stand-in pg, an ORM that calls it on a later tick (like drizzle), and an app helper that
+  // wraps pool.query and returns its promise without awaiting it (a timing helper, say).
+  const pg = `class Pool { query(text) { return new Promise((r) => setTimeout(() => r({ rows: [], rowCount: 0 }), 1)); } }
+class Client { query() { return Promise.resolve({ rows: [] }); } }
+module.exports = { Pool, Client };`;
+  const orm = `module.exports = (pool) => ({ run: async (text) => { await null; return pool.query(text); } });`;
+  const wrapper = `module.exports = function timePool(pool) {
+  const query = pool.query.bind(pool);
+  pool.query = (...args) => query(...args);
+};`;
+  const app = `const http = require('node:http');
+const { Pool } = require('pg');
+const pool = new Pool();
+require('./src/timing')(pool);
+const db = require('orm')(pool);
+async function listUsers() {
+  const rows = await db.run('select 1 from users');
+  return rows;
+}
+const server = http.createServer(async (req, res) => {
+  await listUsers();
+  res.end('ok');
+});
+server.listen(0, () => process.send(server.address().port));`;
+  const traces = await record(['/w'], { 'node_modules/pg/index.js': pg, 'node_modules/orm/index.js': orm, 'src/timing.js': wrapper, 'wrapped.js': app }, 'wrapped.js');
+  const span = traces.find((t) => t.url === '/w').spans.find((s) => s.kind === 'db');
+  assert.equal(span.frames[0].fn, 'listUsers');
+  assert.equal(span.frames[0].file, 'wrapped.js');
+});

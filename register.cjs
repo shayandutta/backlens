@@ -465,6 +465,13 @@ if (TARGET && !globalThis.__backlens) {
     storage.exit(() => setImmediate(() => advise(pool, text).catch(() => {})));
   }
 
+  /** App helpers that replace pool.query (timing, logging) are not where the query came from. */
+  function pastWrappers(frames) {
+    let i = 0;
+    while (i < frames.length - 1 && /(^|\.)query$/.test(frames[i].fn)) i++;
+    return i ? frames.slice(i) : frames;
+  }
+
   function recordQuery(original, self, args) {
     const [config, values] = args;
     const text = typeof config === 'string' ? config : config && config.text;
@@ -502,7 +509,10 @@ if (TARGET && !globalThis.__backlens) {
           throw err;
         } finally {
           const later = appFrames();
-          if (later.length > end.span.frames.length) end.span.frames = later;
+          // On a tie the later stack wins: it ends at the code that awaited the result, while the
+          // stack at call time can stop at a wrapper around pool.query that did not await it.
+          if (later.length && later.length >= end.span.frames.length) end.span.frames = later;
+          end.span.frames = pastWrappers(end.span.frames);
         }
       })();
     }
