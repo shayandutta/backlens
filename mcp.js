@@ -184,6 +184,17 @@ const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
   {
+    name: 'measure_url',
+    description:
+      'Sends a plain GET to a path on the running app (no cookies, no headers), a few warm-up runs and then measured runs, and compares it with requests recorded earlier on the same route. For public routes, or when there is no recorded request to replay. Call it before changing code too, so there is a before to compare with.',
+    inputSchema: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'A path on the app, like "/v1/reviews?page=2".' }, runs: { type: 'number', description: 'Measured runs (default 5, at most 20).' } },
+      required: ['url'],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
     name: 'app_logs',
     description: "The app's recent output (stdout and stderr), as backlens runs it.",
     inputSchema: { type: 'object', properties: { lines: { type: 'number', description: 'How many lines (default 80, at most 400).' } } },
@@ -266,11 +277,12 @@ async function call(name, args, cwd) {
     return traceText(trace, issues);
   }
 
-  if (name === 'measure_request') {
-    if (typeof args.id !== 'string') throw new Error('Give a request id from list_requests.');
-    const m = await api(session, 'POST', '/api/measure', { id: args.id, runs: args.runs });
+  if (name === 'measure_request' || name === 'measure_url') {
+    if (name === 'measure_request' && typeof args.id !== 'string') throw new Error('Give a request id from list_requests.');
+    if (name === 'measure_url' && typeof args.url !== 'string') throw new Error('Give a path on the app, like /v1/reviews.');
+    const m = await api(session, 'POST', '/api/measure', name === 'measure_url' ? { url: args.url, runs: args.runs } : { id: args.id, runs: args.runs });
     const row = (label, x) => (x ? `${label.padEnd(18)} ${ms(x.ms).padStart(10)}   ${String(x.queries).padStart(3)} queries  ${String(x.redis).padStart(3)} redis  ${String(x.http).padStart(3)} http   status ${x.status}   (${plural(x.runs, 'run')})` : `${label.padEnd(18)} none recorded`);
-    const out = [`${m.route}`, '', row('recorded earlier', m.recorded), row('now (median)', m.now)];
+    const out = [`${m.route}${name === 'measure_url' ? `  (plain GET ${args.url}, no cookies)` : ''}`, '', row('recorded earlier', m.recorded), row('now (median)', m.now)];
     if (m.recorded && m.recorded.ms && m.now.ms != null) {
       const pct = Math.round(((m.now.ms - m.recorded.ms) / m.recorded.ms) * 100);
       out.push(`${''.padEnd(18)} ${`${pct > 0 ? '+' : ''}${pct}%`.padStart(10)}   ${m.now.queries - m.recorded.queries >= 0 ? '+' : ''}${m.now.queries - m.recorded.queries} queries`);
@@ -341,7 +353,7 @@ export async function runMcp({ cwd = process.cwd(), args = [] } = {}) {
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: 'backlens', version: VERSION },
         instructions:
-          'backlens records what each request to the local app does (SQL, Redis, outgoing HTTP, with the code line behind each call) and finds N+1 queries, repeated calls, serial awaits and missing indexes. Typical loop: status, list_issues, get_request on the example, change the code, then measure_request on the same request id to confirm the issue is gone and the request is faster, and run_tests.',
+          'backlens records what each request to the local app does (SQL, Redis, outgoing HTTP, with the code line behind each call) and finds N+1 queries, repeated calls, serial awaits and missing indexes. Typical loop: status, list_issues, get_request on the example; measure the request BEFORE changing code (measure_request on a request recorded from the app, or measure_url for a public route), change the code (backlens restarts the app on file changes), measure the same thing again to confirm the issue is gone and it got faster, then run_tests. Requests from run_tests can be read with get_request but not replayed: measure_url, or a page opened in the app, gives something to replay.',
       });
     }
     if (method === 'ping') return isRequest && reply(id, {});

@@ -349,9 +349,13 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
     if (req.method === 'POST' && url.pathname === '/api/measure') {
       const body = await readJson(req);
       const id = body && typeof body.id === 'string' ? body.id : '';
-      const original = traces.find((t) => t.id === id);
-      if (!original) return json(res, 404, { error: 'No recorded request with that id. List recent requests first.' });
-      const payload = replays.get(id);
+      // Either a recorded request (with its headers, so a signed-in page stays signed in), or a
+      // path on the app sent as a plain GET with no cookies or headers: public routes only.
+      const path = body && typeof body.url === 'string' ? body.url.trim() : '';
+      if (path && !/^\/[^\s]*$/.test(path)) return json(res, 400, { error: 'Give a path on the app, like /v1/reviews (no host).' });
+      const original = path ? null : traces.find((t) => t.id === id);
+      if (!path && !original) return json(res, 404, { error: 'No recorded request with that id. List recent requests first.' });
+      const payload = path ? { method: 'GET', url: path, headers: {} } : replays.get(id);
       if (!payload) return json(res, 400, { error: ai && ai.replayEnabled() ? 'This request cannot be replayed (its body was too large, or it was recorded before replay was on).' : 'Replay is off in AI settings.' });
       if (!['GET', 'HEAD', 'OPTIONS'].includes(payload.method)) return json(res, 400, { error: `${payload.method} changes data, so backlens does not replay it here. Measure a read on the same route instead.` });
       const runs = Math.min(20, Math.max(1, Number(body.runs) || 5));
@@ -363,16 +367,17 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
       if (!port) return json(res, 409, { error: 'The app is not running. Start it (restart_app) and try again.' });
       const samples = await ai.measure(payload, port, { samples: runs });
       if (!samples.length) return json(res, 504, { error: 'The replayed request did not finish within 20 s. Check the app logs.' });
-      const route = routeOf(original.method, original.url, original.template);
+      const last = samples.at(-1);
+      const route = original ? routeOf(original.method, original.url, original.template) : routeOf(last.method, last.url, last.template);
       const since = fixedAt.get(`route:${route}`) || 0;
-      const recorded = traces.filter((t) => t.at > since && !t.afterFix && routeOf(t.method, t.url, t.template) === route && t.status === original.status).slice(-runs);
+      const status = original ? original.status : last.status;
+      const recorded = traces.filter((t) => t.at > since && !t.afterFix && routeOf(t.method, t.url, t.template) === route && t.status === status).slice(-runs);
       const count = (t, kind) => t.spans.filter((x) => x.kind === kind).length;
       const median = (list) => {
         const v = list.map((t) => t.duration).sort((a, b) => a - b);
         return v.length ? Math.round(v[Math.floor((v.length - 1) / 2)] * 100) / 100 : null;
       };
       const describe = (list, last) => ({ runs: list.length, ms: median(list), status: last.status, queries: count(last, 'db'), redis: count(last, 'redis'), http: count(last, 'http') });
-      const last = samples.at(-1);
       const seen = new Map();
       for (const t of samples) for (const i of checkTrace(t)) if (!seen.has(i.title)) seen.set(i.title, { type: i.type, title: i.title, sites: i.sites, sql: i.sql });
       return json(res, 200, {

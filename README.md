@@ -89,9 +89,10 @@ Keep `npx backlens` running in the server folder; the MCP server reads that sess
 | `list_routes`, `list_requests` | p50, p95, calls per request; recent requests with ids |
 | `get_request` | the waterfall of one request: each query, Redis and HTTP call, its time and the code behind it |
 | `measure_request` | replays a recorded GET against the code as it is now (warm-up, then median of runs) and compares it with what was recorded |
+| `measure_url` | the same for a path sent as a plain GET (no cookies): public routes, or a before when nothing is recorded yet |
 | `app_logs`, `restart_app`, `run_tests` | the app's output, a restart, the test script with its issues |
 
-A typical loop: *list_issues → get_request → edit → measure_request → run_tests*. On a sample N+1 that went from 6 queries and 6.7 ms to 2 queries and 1.6 ms, checked by replay. Writes are never replayed, and parameter values never reach the agent.
+A typical loop: *list_issues → get_request → measure (before) → edit → measure again → run_tests*. On a sample N+1 that went from 6 queries and 6.7 ms to 2 queries and 1.6 ms, checked by replay. Writes are never replayed, and parameter values never reach the agent.
 
 ## In CI: fail the build on new issues
 

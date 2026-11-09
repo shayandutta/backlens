@@ -84,6 +84,10 @@ test('an editor can list issues and read a request through backlens mcp, without
     const missing = await mcp.tool('measure_request', { id: 'nope' });
     assert.equal(missing.isError, true);
     assert.match(missing.content[0].text, /No recorded request/);
+
+    const host = await mcp.tool('measure_url', { url: 'http://example.com/' });
+    assert.equal(host.isError, true, 'only paths on the app itself');
+    assert.match(host.content[0].text, /no host/);
   } finally {
     mcp.close();
     await server.shutdown();
