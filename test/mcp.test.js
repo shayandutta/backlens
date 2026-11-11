@@ -6,8 +6,8 @@ import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findSessions } from '../mcp.js';
-import { startServer } from '../server.js';
+import { findSessions } from '../src/mcp/session.js';
+import { startServer } from '../src/dashboard/server.js';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'backlens.js');
 const TOKEN = 'a'.repeat(32);

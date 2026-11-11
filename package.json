@@ -8,27 +8,20 @@
     "backlens": "bin/backlens.js"
   },
   "exports": {
-    "./register": "./register.cjs"
+    "./register": "./src/recorder/index.cjs",
+    "./package.json": "./package.json"
   },
   "files": [
     "bin",
-    "ai",
-    "register.cjs",
-    "server.js",
-    "analyze.js",
-    "report.js",
-    "config.js",
-    "runner.js",
-    "ui.html",
-    "mcp.js",
-    "agent-usage.js",
+    "src",
     "statusline.js"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/",
+    "check": "node scripts/check-syntax.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",

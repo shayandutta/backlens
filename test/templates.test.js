@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { promiseAll } from '../ai/templates.js';
+import { promiseAll } from '../src/ai/templates.js';
 
 function project(code) {
   const root = mkdtempSync(join(tmpdir(), 'bl-t-'));

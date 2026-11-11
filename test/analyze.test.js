@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { checkTrace, normalizeSql, routeOf, summarize } from '../analyze.js';
+import { checkTrace, normalizeSql, routeOf, summarize } from '../src/analysis/index.js';
 
 const frame = (fn, line, file = 'src/orders.ts') => [{ fn, file, line }];
 const db = (name, start, duration, params, fn = 'load', line = 10) => ({ kind: 'db', name, start, duration, params, frames: frame(fn, line) });
@@ -97,14 +97,14 @@ test('slugs stay, mixed-case tokens become :id', () => {
 });
 
 test('the map reads tables from SQL, skipping keywords that look like tables', async () => {
-  const { tablesOf, keyGroup } = await import('../analyze.js');
+  const { tablesOf, keyGroup } = await import('../src/analysis/index.js');
   assert.deepEqual(tablesOf('insert into "progress" (a) values ($1) on conflict (a) do update set a = excluded.a'), { tables: ['progress'], write: true });
   assert.deepEqual(tablesOf('select x from "lessons" inner join "chapters" on y'), { tables: ['lessons', 'chapters'], write: false });
   assert.equal(keyGroup('rl:route:lesson-read:user:{id}'), 'rl:route:*');
 });
 
 test('the map marks real issues on their wires, not hints', async () => {
-  const { mapOf } = await import('../analyze.js');
+  const { mapOf } = await import('../src/analysis/index.js');
   const t = { id: 'x', method: 'GET', url: '/a/1', status: 200, at: 0, duration: 3, spans: [{ kind: 'db', name: 'select 1 from "orders" where id = $1', start: 0, duration: 1, params: 'p', frames: [] }] };
   const warn = mapOf([t], [{ severity: 'warn', route: 'GET /a/:id', sql: 'select 1 from "orders" where id = $1' }]);
   const hint = mapOf([t], [{ severity: 'hint', route: 'GET /a/:id', sql: 'select 1 from "orders" where id = $1' }]);

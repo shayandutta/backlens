@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { currentKey, looksLikeKey, removeKey, saveKey, savedKey } from '../ai/credentials.js';
-import { anthropicStatus, recommendedModel } from '../ai/providers.js';
+import { currentKey, looksLikeKey, removeKey, saveKey, savedKey } from '../src/ai/credentials.js';
+import { anthropicStatus, recommendedModel } from '../src/ai/providers/index.js';
 
 const KEY = `sk-ant-api03-${'a'.repeat(40)}wxyz`;
 

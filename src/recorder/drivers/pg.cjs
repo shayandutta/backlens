@@ -1,0 +1,103 @@
+'use strict';
+/**
+ * Postgres through `pg` (Client and Pool), which drizzle, Kysely, knex and Prisma's pg adapter all
+ * use. Pool queries are recorded where the app calls pool.query: the client query inside may run
+ * later, in the context of whichever request freed a connection, and is skipped.
+ */
+
+const { begin } = require('../context.cjs');
+const { appFrames } = require('../frames.cjs');
+const { maybeAdvise, usePool } = require('../index-advisor.cjs');
+const { hashValues, paramPrints, resultPrints } = require('../privacy.cjs');
+
+let insidePool = false;
+
+/** App helpers that replace pool.query (timing, logging) are not where the query came from. */
+function pastWrappers(frames) {
+  let i = 0;
+  while (i < frames.length - 1 && /(^|\.)query$/.test(frames[i].fn)) i++;
+  return i ? frames.slice(i) : frames;
+}
+
+function recordQuery(original, self, args) {
+  const [config, values] = args;
+  const text = typeof config === 'string' ? config : config && config.text;
+  if (typeof text !== 'string') return original.apply(self, args);
+  const params = typeof config === 'object' && config.values !== undefined ? config.values : Array.isArray(values) ? values : undefined;
+  const end = begin('db', text.replace(/\s+/g, ' ').trim().slice(0, 600), { params: hashValues(params), took: paramPrints(params) });
+  if (!end) return original.apply(self, args);
+  const done = (res) => {
+    end({ rows: res ? (res.rowCount ?? (res.rows ? res.rows.length : undefined)) : undefined, gave: res ? resultPrints(res.rows) : undefined });
+    maybeAdvise(text);
+  };
+  const list = [...args];
+  const cbIndex = list.findIndex((a) => typeof a === 'function');
+  if (cbIndex !== -1) {
+    const cb = list[cbIndex];
+    list[cbIndex] = function (err, res) {
+      if (err) end({ error: true });
+      else done(res);
+      return cb.apply(this, arguments);
+    };
+    return original.apply(self, list);
+  }
+  const result = original.apply(self, list);
+  if (result && typeof result.then === 'function') {
+    // ORMs like drizzle call the driver from a microtask, so the stack at call time may hold no
+    // app code, or only a thin wrapper. Once the query settles inside this awaited function,
+    // V8's async stack reaches the real caller; keep whichever stack shows more of the app.
+    return (async () => {
+      try {
+        const res = await result;
+        done(res);
+        return res;
+      } catch (err) {
+        end({ error: true });
+        throw err;
+      } finally {
+        const later = appFrames();
+        // On a tie the later stack wins: it ends at the code that awaited the result, while the
+        // stack at call time can stop at a wrapper around pool.query that did not await it.
+        if (later.length && later.length >= end.span.frames.length) end.span.frames = later;
+        end.span.frames = pastWrappers(end.span.frames);
+      }
+    })();
+  }
+  if (config && typeof config.on === 'function') {
+    config.on('end', done);
+    config.on('error', () => end({ error: true }));
+  }
+  return result;
+}
+
+function patchPg(pg) {
+  const Client = pg && pg.Client;
+  const Pool = pg && pg.Pool;
+  if (Client && !Client.prototype.__backlens) {
+    Client.prototype.__backlens = true;
+    const query = Client.prototype.query;
+    Client.prototype.query = function () {
+      // Called by the pool, not the app: either synchronously inside pool.query, or later with no app code on the stack.
+      if (insidePool || appFrames().length === 0) return query.apply(this, arguments);
+      return recordQuery(query, this, [...arguments]);
+    };
+  }
+  if (Pool && !Pool.prototype.__backlens) {
+    Pool.prototype.__backlens = true;
+    const query = Pool.prototype.query;
+    Pool.prototype.query = function () {
+      usePool(this);
+      const original = function () {
+        insidePool = true;
+        try {
+          return query.apply(this, arguments);
+        } finally {
+          insidePool = false;
+        }
+      };
+      return recordQuery(original, this, [...arguments]);
+    };
+  }
+}
+
+module.exports = { patchPg };

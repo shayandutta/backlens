@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const REGISTER = join(dirname(fileURLToPath(import.meta.url)), '..', 'register.cjs');
+const REGISTER = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'recorder', 'index.cjs');
 
 /**
  * Runs a tiny app whose handler lives in a bundled chunk with an external source map, the way
