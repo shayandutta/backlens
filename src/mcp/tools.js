@@ -78,6 +78,22 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
   {
+    name: 'diff',
+    description:
+      "What your change did to the running app: replays one recorded read per route (up to 30) and compares each with the baseline: status, response shape (fields and types, never values), queries, Redis and outgoing calls, errors and new performance issues (time only when asked: it is noisy right after a change; use measure_request for timing). ✗ broken (failing status, lost field, changed type, new error), ~ changed, ↑ better. Silent when nothing changed. The first call takes the baseline; call it again after changing code. Restarts the app first when needed so timings compare fresh against fresh.",
+    inputSchema: {
+      type: 'object',
+      properties: { route: { type: 'string', description: 'Only this route, like "GET /v1/reviews".' }, time: { type: 'boolean', description: 'Also flag routes more than 2x and 10 ms slower (coarse).' } },
+    },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'accept',
+    description: "Takes the routes' current behavior as the new baseline: after a diff showed an intended change. Give routes to accept only those; with none, every route is re-taken from current traffic.",
+    inputSchema: { type: 'object', properties: { routes: { type: 'array', items: { type: 'string' }, description: 'Routes to accept, like ["GET /v1/reviews"]. Omit for all.' } } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
     name: 'usage',
     description:
       'What this work cost in Claude Code: tokens and dollars for the current prompt, the session and the last 30 days of prompts that used backlens, and an estimate of what finding the same issues by reading code would take. Call it last, and end your report with its first line.',

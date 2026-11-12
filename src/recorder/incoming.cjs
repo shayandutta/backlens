@@ -12,6 +12,7 @@ const { randomUUID } = require('node:crypto');
 const { now, round, storage } = require('./context.cjs');
 const { SOURCE } = require('./env.cjs');
 const { handleCommand } = require('./index-advisor.cjs');
+const { captureBody } = require('./shape.cjs');
 const { post, send, tokenOk } = require('./transport.cjs');
 
 // Framework internals and browser asset fetches, not the app's own routes: Next.js build
@@ -47,6 +48,8 @@ function patchServers() {
       };
       const replayOf = req.headers['x-backlens-replay'];
       if (replayOf) trace.replayOf = String(replayOf);
+      // The behavior diff asks for the response's shape (paths and types, no values) on its replays.
+      const shapeDone = replayOf && req.headers['x-backlens-shape'] === '1' ? captureBody(res) : null;
       const chunks = [];
       let bodySize = 0;
       const reqEmit = req.emit;
@@ -69,6 +72,7 @@ function patchServers() {
         // express sets req.route once a route matched; fastify's template arrives via its onRequest hook.
         if (!trace.template && req.route && typeof req.route.path === 'string') trace.template = `${req.baseUrl || ''}${req.route.path}`;
         trace.status = aborted ? 499 : res.statusCode;
+        if (shapeDone) trace.shape = shapeDone();
         if (aborted) trace.aborted = true;
         trace.duration = round(now() - trace.began);
         delete trace.began;

@@ -4,10 +4,13 @@ import { join } from 'node:path';
 import { createAI } from '../ai/index.js';
 import { packageManager, readProject } from '../shared/project.js';
 import { loadConfig, projectDir } from '../shared/project-config.js';
+import { createBehavior } from './behavior.js';
+import { createFreshness } from './fresh.js';
 import { accessChecks, json } from './http.js';
 import { createProcesses } from './processes.js';
 import { createReplayer } from './replay.js';
 import aiRoutes from './routes/ai.js';
+import behaviorRoutes from './routes/behavior.js';
 import indexRoutes from './routes/indexes.js';
 import ingestRoutes from './routes/ingest.js';
 import measureRoutes from './routes/measure.js';
@@ -52,7 +55,9 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
     procs: () => procs,
     ai: () => ai,
   };
-  const routes = [ingestRoutes, trafficRoutes, projectRoutes, measureRoutes, indexRoutes, aiRoutes].flatMap((make) => make(ctx));
+  ctx.fresh = createFreshness({ store, procs: ctx.procs });
+  ctx.behavior = createBehavior({ root, store, replayer, fresh: ctx.fresh });
+  const routes = [ingestRoutes, trafficRoutes, projectRoutes, measureRoutes, behaviorRoutes, indexRoutes, aiRoutes].flatMap((make) => make(ctx));
 
   function match(req, pathname) {
     for (const r of routes) {

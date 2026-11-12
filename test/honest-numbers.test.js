@@ -5,7 +5,7 @@ import { indexIssues } from '../src/analysis/index-advice.js';
 import { compareTimings, timing } from '../src/shared/compare.js';
 
 test('a timing is the median with its middle half', () => {
-  assert.deepEqual(timing([9, 5, 6, 5.5, 30]), { ms: 6, lo: 5.5, hi: 9, runs: 5 });
+  assert.deepEqual(timing([9, 5, 6, 5.5, 30]), { ms: 6, lo: 5.5, hi: 9, min: 5, max: 30, runs: 5 });
   assert.equal(timing([]), null);
 });
 

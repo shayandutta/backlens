@@ -12,13 +12,13 @@ export const MIN_MS = 1;
 
 const quantile = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(q * (sorted.length - 1))))];
 
-/** Median and spread of a list of durations in ms; null for an empty list. */
+/** Median, middle half (lo-hi) and extremes of a list of durations in ms; null for an empty list. */
 export function timing(durations) {
   const xs = durations.filter((d) => typeof d === 'number' && Number.isFinite(d)).sort((a, b) => a - b);
   if (!xs.length) return null;
   const mid = Math.floor(xs.length / 2);
   const ms = xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2;
-  return { ms: r2(ms), lo: r2(quantile(xs, 0.25)), hi: r2(quantile(xs, 0.75)), runs: xs.length };
+  return { ms: r2(ms), lo: r2(quantile(xs, 0.25)), hi: r2(quantile(xs, 0.75)), min: r2(xs[0]), max: r2(xs.at(-1)), runs: xs.length };
 }
 
 /**

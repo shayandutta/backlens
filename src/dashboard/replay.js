@@ -11,7 +11,7 @@ export function createReplayer() {
   const waiters = new Map();
 
   /** Sends one request and resolves with its trace, or null if none came back in time. */
-  function send(payload, port, id) {
+  function send(payload, port, id, extraHeaders = null) {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         waiters.delete(id);
@@ -22,7 +22,7 @@ export function createReplayer() {
         waiters.delete(id);
         resolve(trace);
       });
-      const req = http.request({ host: '127.0.0.1', port, method: payload.method, path: payload.url, headers: { ...payload.headers, 'x-backlens-replay': id } });
+      const req = http.request({ host: '127.0.0.1', port, method: payload.method, path: payload.url, headers: { ...payload.headers, ...extraHeaders, 'x-backlens-replay': id } });
       req.on('error', () => {});
       if (payload.body) req.write(Buffer.from(payload.body, 'base64'));
       req.end();

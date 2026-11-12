@@ -1,5 +1,6 @@
 import { relative } from 'node:path';
 import { agentUsage, usageText } from '../agent-usage/index.js';
+import { acceptText, diffText } from '../diff/format.js';
 import { timingText } from '../shared/compare.js';
 import { ago, issueText, ms, plural, traceText } from './format.js';
 import { api, findSessions, NOT_RUNNING } from './session.js';
@@ -8,6 +9,8 @@ import { VERSION } from '../shared/version.js';
 /** What each tool does: reads the running dashboard's API and answers in plain text. */
 
 const sleep = (t) => new Promise((r) => setTimeout(r, t));
+// The dashboard answers 409 with { error } for a diff that could not run: show that text.
+const passError = (err) => ({ error: err.message });
 
 export async function call(name, args, cwd) {
   const sessions = findSessions(cwd);
@@ -104,6 +107,9 @@ export async function call(name, args, cwd) {
     out.push('', 'Query counts are exact. Times are warm medians; a change counts only when it is at least 1 ms and the p25-p75 ranges do not overlap.', '', 'Last replay:', traceText(m.trace));
     return out.join('\n');
   }
+
+  if (name === 'diff') return diffText(await api(session, 'POST', '/api/behavior/diff', { route: args.route, time: args.time === true }).catch(passError));
+  if (name === 'accept') return acceptText(await api(session, 'POST', '/api/behavior/accept', Array.isArray(args.routes) ? { routes: args.routes } : {}).catch(passError));
 
   if (name === 'app_logs') {
     const info = await api(session, 'GET', '/api/app?since=0');

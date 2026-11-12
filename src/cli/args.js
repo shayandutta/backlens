@@ -11,7 +11,7 @@ export function parseArgs(argv) {
   return {
     own,
     command,
-    subcommand: ['test', 'mcp', 'statusline'].includes(own[0]) ? own[0] : null,
+    subcommand: ['test', 'mcp', 'statusline', 'diff', 'accept'].includes(own[0]) ? own[0] : null,
     has: (name) => own.includes(name),
     /** The value after a flag (`--port 7777`), or undefined. */
     flag: (name) => {
@@ -32,6 +32,15 @@ export const HELP = `usage:
   backlens mcp [--root <project folder>]
       For AI editors (Claude Code, Cursor...): an MCP server over stdio that reads the
       running dashboard for this project: issues, requests, replays, logs and tests.
+
+  backlens diff [--route "GET /path"] [--time] [--json]
+      With the dashboard running: replay one read per route and compare with the baseline
+      (status, response shape, queries, calls, errors; --time adds coarse timing).
+      Exit 1 when something broke.
+      The first run takes the baseline.
+
+  backlens accept [route...]
+      Take the current behavior of these routes (or all) as the new baseline.
 
   backlens statusline --install | --uninstall
       For Claude Pro and Max: lets backlens see how much of your plan's 5-hour and weekly

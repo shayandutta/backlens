@@ -5,6 +5,74 @@ Numbers come from real runs; say so when something was not measured.
 
 ---
 
+## 2026-11-12 (later): Phase 2, behavior diff (branch `phase2/behavior-diff`)
+
+### Done
+
+- **Recorder** (`recorder/shape.cjs`): on replays sent with `x-backlens-shape: 1`, the JSON
+  response's shape (paths and types) is computed inside the app; values never leave it.
+- **`src/diff/`** (pure): `fingerprint` (status, shape, query, Redis and HTTP counts, failing
+  calls, perf issues, timing), `compareFingerprints` (✗ broken / ~ changed / ↑ better, with
+  data-drift rules) and text formatting.
+- **`dashboard/behavior.js`**:
+  - baseline: the newest replayable GET per route, up to 30, saved to `.backlens/behavior.json`
+    (mode 600, no headers or values, secret-looking query dropped)
+  - diff: 1 warm-up + 3 runs per route
+  - accept
+- **`dashboard/fresh.js`**: one fresh-run rule shared by `measure` and `diff`.
+- **Surfaces:** MCP `diff` and `accept`; CLI `backlens diff` (exit 1 on broken) and
+  `backlens accept`; the MCP instructions now end the loop with `diff`.
+- **Tests:** 75 in all.
+  - `test/diff.test.js`: shape, drift and rule unit tests.
+  - `test/behavior.test.js`: end to end, with a real dashboard and a tiny app under the recorder.
+    Baseline, quiet, lost field, 500, accept.
+
+### Measured on oldmonk (17 GET routes, signed in as admin)
+
+| Check | Result |
+|---|---|
+| Seeded: `me()` drops `email` | ✗ response lost `$.email` (0.5 s) |
+| Seeded: `me()` reads the user twice | ~ 1 more query (1 → 2), ~ new issue: repeat (0.6 s) |
+| Seeded: `me/orders` throws | ✗ answers 500 (was 200) (0.7 s); CLI exit 1 |
+| Restored | no behavior change (0.6 s); CLI exit 0 |
+| 10 clean runs, final design | 10/10 "no behavior change" |
+| Clean runs with time on, first design | 4/5 with false "slower" |
+| Clean runs with time on, after a fresh-run fix | 1/6 false |
+| Clean runs with time on, after machine-wide suppression | 2 false among the seed rounds |
+| Seeded 50 ms sleep with time on | lost: 15 routes looked slower together, so it was suppressed as machine noise |
+| Structural signals (status, shape, queries, calls) | 0 false findings in every clean run (more than 25) |
+| Time per diff | 0.5–0.9 s for 17 routes when the app had just restarted for a code change; 7–12 s when backlens had to restart it |
+
+### Learned
+
+- **Structural signals are exact and free of noise; time is not.**
+  - Right after a code change, the dev watcher (likely recompiling) loads the machine. Clean routes
+    then read 2–4× slower at random.
+  - So time is off by default in `diff` (`--time` to opt in), and precise timing stays with
+    `measure_request`.
+- **Baseline and diff must start from the same app state.** The first baseline was taken on a run
+  that had served traffic; every diff after a restart then looked slower.
+- **The agent flow is the cheap case:** edit, then the watcher restarts, then `diff` runs on a
+  fresh run with no extra restart, in under 1 s.
+
+### Not done or not verified
+
+- Routes beyond 17: the target was 30. Time per route was about 35 ms, so 30 routes should take
+  about 1 s, but this was not measured.
+- Dashboard UI: there is no diff view yet (CLI and MCP only), and the UI was still not clicked
+  through.
+- After a dashboard restart, signed-in routes are skipped until used once. Phase 3 (login
+  profiles) removes this.
+- Writes are not covered.
+
+### Next
+
+- Phase 3: access broker (login profiles, replay as a role, replayable test traffic).
+- Or Phase 4 first: `backlens init claude` with a Stop hook running `backlens diff`. The diff is
+  fast enough in the edit flow, and exit 1 already means "broken".
+
+---
+
 ## 2026-11-12: Phase 1, honest measurement (branch `phase1/honest-measurement`)
 
 ### Done

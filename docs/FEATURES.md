@@ -83,7 +83,25 @@ after a kept fix until a request on the new code shows them again.
 | `measure_request` | replay a recorded GET with its headers (works for signed-in routes) on a fresh app run; median with p25–p75; compared with the last measurement of the same request: faster / slower / within noise; issues still present |
 | `measure_url` | the same for a plain GET to a path, no headers |
 | `app_logs`, `restart_app`, `run_tests` | app output; restart and wait for the port; tests with their issues |
+| `diff` | behavior diff of every baseline route (see 5b) |
+| `accept` | take routes' current behavior into the baseline |
 | `usage` | tokens / dollars / plan-limit share of this prompt, session, 30 days; estimate of source an agent would have read instead |
+
+## 5b. Behavior diff
+
+`src/diff/` (pure), `src/dashboard/behavior.js`, `src/recorder/shape.cjs`. Surfaces: MCP `diff` /
+`accept`, CLI `backlens diff [--route] [--time] [--json]` (exit 1 on broken, 2 if it could not
+run) and `backlens accept [route...]`, API `POST /api/behavior/diff|accept`, `GET /api/behavior`.
+
+| Part | Detail |
+|---|---|
+| Baseline | newest replayable GET per route (status < 500), most-called first, up to 30; taken on a fresh app run with no traffic; `.backlens/behavior.json` mode 600, no headers or values; a secret-looking query (`token`, `code`, `key`…) is dropped from the saved URL |
+| Replay | 1 warm-up + 3 runs per route, in a fixed order, on a fresh run (restart unless the run has had no traffic); `x-backlens-shape: 1`, `accept-encoding: identity`; 429 runs dropped; a route with no request in memory and auth headers is skipped with the reason |
+| Fingerprint | status; JSON shape (paths → types, computed inside the app); normalized query counts; Redis commands; outgoing hosts; failing calls with `file:line`; perf issues from the checks; timing |
+| ✗ broken | 2xx/3xx → 4xx or 5xx; a field removed; a field's type changed; a new failing call |
+| ~ changed | more queries or a new statement; more Redis or outgoing calls; a new outgoing host; a new perf issue; a new field; slower (only with `--time`) |
+| ↑ better | fewer queries or calls; an issue gone; 4xx/5xx → 2xx; faster (only with `--time`) |
+| Noise rules | an empty array or a null value hides its subtree (data drift); null ↔ type is not a type change; a status class change skips the other comparisons; time is opt-in, needs more than 2× and 10 ms with every run past every baseline run, is re-run to confirm, and is dropped when a third of the routes move together |
 
 ## Measurement (how a before → after is decided)
 
@@ -130,6 +148,11 @@ Open:
    signed-in routes need a manual login to get something measurable. (Phase 3)
 2. No replay of writes (POST/PUT/DELETE) except by opt-in, which changes the dev database.
 3. Postgres only for the index advisor (16+); no mysql2 or MongoDB; macOS-tested.
-4. Measuring costs an app restart (~7 s on oldmonk). Small real gains (≈ 1–1.5 ms) can come out
+4. Measuring costs an app restart (~7 s on oldmonk); so does a `diff` when the app has had traffic
+   since it started (none after a code change, since the watcher already restarted it). Small real gains (≈ 1–1.5 ms) can come out
    "within noise": the verdict leans to under-claiming.
-5. A rate limiter can eat replays: 30 warm-ups + 20 runs is 50 requests per measurement.
+5. A rate limiter can eat replays: 30 warm-ups + 20 runs is 50 requests per measurement, and a
+   30-route diff is 120 requests.
+6. `diff` covers reads only, one request per route, and only routes the app served; signed-in
+   routes need a request in the dashboard's memory (Phase 3: login profiles).
+7. `diff` time is too noisy right after a code change to be on by default.

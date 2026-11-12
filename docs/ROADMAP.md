@@ -78,12 +78,15 @@ Out of scope: project conventions, scope creep, non-determinism. These are not r
   - Redis and HTTP calls
   - errors with `file:line`
   - median latency
-- **Compare.** Replay the baseline with 1 warm-up and 3–5 measured runs. Flag:
+- **Compare.** Replay the baseline with 1 warm-up and 3 runs. Flag:
   - a status class change
   - a new error or a changed shape
   - a query-count change, or a new N+1 or serial await
   - a new outgoing call
-  - latency, only when it moves more than 20% **and** more than 2 ms, median against median
+  - latency: off by default since Phase 2 (see WORKLOG 2026-11-12: right after a code change a
+    dev watcher compiling in the background made clean routes look 2–4× slower). Opt in with
+    `--time` / `time: true`: more than 2× and 10 ms, every run past every baseline run, re-run to
+    confirm, dropped when a third of the routes move together.
 - **Accept.** `backlens accept [route]` takes an intended change into the baseline.
 
 ### 3. Verification gate (harness)
@@ -122,7 +125,7 @@ New:
 |---|---|---|
 | 0 ✅ | Modular refactor, docs, CI | 60 tests pass; identical e2e output on a real API |
 | 1 ✅ | Fix the credibility gaps (FEATURES.md "Known gaps", fixed list) | measure compares warm median vs warm median; index hints skip tiny tables and covered filters; `status` shows MCP and recorder versions and warns on mismatch; README pins `@latest` |
-| 2 | Behavior diff MVP: baseline, fingerprints, diff engine, `backlens diff` CLI + MCP `diff`/`accept` | catches a seeded break (500, shape change, extra query) on a real app in < 5 s for 30 routes; < 1 false alarm per 10 clean runs |
+| 2 ✅ | Behavior diff MVP: baseline, fingerprints, diff engine, `backlens diff` CLI + MCP `diff`/`accept` | catches a seeded break (500, shape change, extra query) on a real app in < 5 s for 30 routes; < 1 false alarm per 10 clean runs |
 | 3 | Access broker: login profiles, replay as role, replayable test traffic | an agent measures a signed-in route with zero setup calls |
 | 4 | Harness: `backlens init claude` (Stop-hook gate, MCP config), accept flow | the hook blocks a broken turn and the agent fixes it unaided |
 | 5 | Proof: eval of 20–30 real tasks on 3+ apps, with and without backlens | published numbers: tokens per task, task success, regressions shipped, false alarms |

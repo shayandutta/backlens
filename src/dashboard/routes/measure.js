@@ -3,9 +3,6 @@ import { REPLAY, SAFE_METHODS } from '../../shared/replay-policy.js';
 import { compareTimings, timing } from '../../shared/compare.js';
 import { json, readJson } from '../http.js';
 
-/** A run that has served more requests than this is no longer fresh. */
-const FRESH_REQUESTS = 50;
-
 const count = (t, kind) => t.spans.filter((x) => x.kind === kind).length;
 const describe = (list, last) => ({ ...timing(list.map((t) => t.duration)), status: last.status, queries: count(last, 'db'), redis: count(last, 'redis'), http: count(last, 'http') });
 
@@ -25,7 +22,7 @@ const describe = (list, last) => ({ ...timing(list.map((t) => t.duration)), stat
  * Either a recorded request (with its headers, so a signed-in page stays signed in), or a path on
  * the app sent as a plain GET with no cookies or headers: public routes only.
  */
-export default function measureRoutes({ store, replayer, procs, ai }) {
+export default function measureRoutes({ store, replayer, fresh, ai }) {
   return [
     {
       method: 'POST',
@@ -41,15 +38,7 @@ export default function measureRoutes({ store, replayer, procs, ai }) {
         if (!payload) return json(res, 400, { error: ai() && ai().replayEnabled() ? 'This request cannot be replayed (its body was too large, or it was recorded before replay was on).' : 'Replay is off in AI settings.' });
         if (!SAFE_METHODS.includes(payload.method)) return json(res, 400, { error: `${payload.method} changes data, so backlens does not replay it here. Measure a read on the same route instead.` });
         const runs = Math.min(REPLAY.maxSamples, Math.max(1, Number(body.runs) || REPLAY.samples));
-        const p = procs();
-        let port = await p.appPort();
-        const run = p.app.startedAt;
-        const used = [...store.measured.values()].some((m) => m.run === run) || store.traces.filter((t) => t.at >= run).length > FRESH_REQUESTS;
-        let restarted = false;
-        if (!port || used) {
-          port = await p.restartApp();
-          restarted = true;
-        }
+        const { port, restarted, run } = await fresh.freshRun();
         if (!port) return json(res, 409, { error: 'The app did not start. Check app_logs.' });
         const all = await replayer.measure(payload, port, { samples: runs });
         if (!all.length) return json(res, 504, { error: `The replayed request did not finish within ${REPLAY.timeoutMs / 1000} s. Check the app logs.` });
@@ -65,7 +54,8 @@ export default function measureRoutes({ store, replayer, procs, ai }) {
         const recorded = store.traces.filter((t) => t.at > since && !t.afterFix && routeOf(t.method, t.url, t.template) === route && t.status === status).slice(-runs);
         const key = `${payload.method} ${payload.url}`;
         const previous = store.measured.get(key) || null;
-        const now = { ...describe(samples, last), at: Date.now(), run: p.app.startedAt };
+        fresh.markUsed(run);
+        const now = { ...describe(samples, last), at: Date.now(), run };
         store.measured.set(key, now);
         const seen = new Map();
         for (const t of samples) for (const i of checkTrace(t)) if (!seen.has(i.title)) seen.set(i.title, { type: i.type, title: i.title, sites: i.sites, sql: i.sql });
