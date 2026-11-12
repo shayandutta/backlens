@@ -23,7 +23,8 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "node scripts/check-syntax.mjs",
-    "prepublishOnly": "npm run check && npm test"
+    "prepublishOnly": "npm run check && npm test",
+    "test:compat": "node --test test/compat/*.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0"

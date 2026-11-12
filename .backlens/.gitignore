@@ -1,0 +1,8 @@
+# Personal: snapshots, AI usage, fix backups and the running session. config.json can be committed.
+snapshots/
+ai/
+ai.json
+ai-usage.jsonl
+ai-history.jsonl
+ai-fixtures.json
+session.json
