@@ -1,5 +1,5 @@
 import { r1 } from '../../shared/stats.js';
-import { at, splitSites, where } from '../frames.js';
+import { at, chainOf, loopSite, splitSites, where } from '../frames.js';
 import { normalizeSql, REDIS_REPEATABLE_READS, tablesOf } from '../statements.js';
 
 /**
@@ -47,10 +47,16 @@ export function findDuplicates(io) {
         type: 'n-plus-one',
         severity: 'warn',
         title: `N+1: one query ran ${list.length} times with different values`,
-        fix: 'Fetch them in one query (WHERE id IN (…) or a join) instead of one per item.',
+        fix: (() => {
+          const loop = loopSite(list[0].frames);
+          return loop
+            ? `Fetch them in one query (WHERE id IN (…) or a join). The calls come from ${loop.fn || 'a function'} (${at(loop)}), which likely loops over the items: batch the lookup there.`
+            : 'Fetch them in one query (WHERE id IN (…) or a join) instead of one per item.';
+        })(),
         sql,
         sites: [...new Set(list.map((s) => at(where(s))))],
         frames: [list[0].frames],
+        chain: chainOf(list[0].frames),
         cost: r1(sum(list) - Math.max(...list.map((s) => s.duration))),
         evidence: { calls: list.length, distinct: distinct.size, sites: new Set(list.map((s) => at(where(s)))).size, located: located(list) },
       });
@@ -97,6 +103,7 @@ export function findDuplicates(io) {
       sql: items.map((r) => r.label).join('\n'),
       sites: [...new Set(sites)],
       frames: [items[0].same[0].frames, items[0].same[1].frames],
+      chains: [chainOf(items[0].same[0].frames), chainOf(items[0].same[1].frames)],
       cost: r1(items.reduce((n, r) => n + sum(r.same.slice(1)), 0)),
       evidence: { located: located(spans), overlapping: items.some((r) => overlapping(r.same)), writeBetween: items.some((r) => writeBetween(r.same)) },
     });

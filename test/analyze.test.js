@@ -182,3 +182,16 @@ test('after a change on a route, issues from its older requests wait for a new r
   assert.equal(issues.length, 1);
   assert.match(issues[0].sites[0], /:49$/);
 });
+
+test('an N+1 names the path that led to it and the caller that likely loops', () => {
+  const frames = [
+    { fn: 'CustomerRepo.find', file: 'src/customers.repo.ts', line: 10 },
+    { fn: 'OrderService.getOrders', file: 'src/orders.service.ts', line: 30 },
+    { fn: 'OrdersController.list', file: 'src/orders.controller.ts', line: 12 },
+  ];
+  const spans = [0, 1, 2, 3, 4].map((i) => ({ kind: 'db', name: 'select * from customers where id = $1', start: i * 3, duration: 2, params: `c${i}`, frames }));
+  const [issue] = checkTrace(trace(spans));
+  assert.equal(issue.type, 'n-plus-one');
+  assert.deepEqual(issue.chain, ['OrdersController.list (src/orders.controller.ts:12)', 'OrderService.getOrders (src/orders.service.ts:30)', 'CustomerRepo.find (src/customers.repo.ts:10)']);
+  assert.match(issue.fix, /come from OrderService\.getOrders \(src\/orders\.service\.ts:30\), which likely loops/);
+});
