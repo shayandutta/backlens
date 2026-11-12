@@ -829,7 +829,7 @@ function compareCard(j) {
     ${c.before.http || c.after.http ? row('outgoing http', c.before.http, c.after.http) : ''}
     <tr><th>status</th><td>${c.before.status}</td><td class="arrow">→</td><td class="${c.before.status === c.after.status ? 'same' : 'worse'}">${c.after.status}</td><td></td></tr>
     <tr><th>issue</th><td>found</td><td class="arrow">→</td><td class="${c.issueGone ? 'better' : 'worse'}">${c.issueGone ? 'gone' : 'still there'}</td><td></td></tr>
-  </table><p class="note">Before: ${c.beforeKind === 'recorded' ? `${c.beforeRuns} recorded request${c.beforeRuns === 1 ? '' : 's'} (may include cold ones, so time is not compared)` : `${c.beforeRuns} warm replay${c.beforeRuns === 1 ? '' : 's'} of the old code`}. After: ${c.afterRuns} replay${c.afterRuns === 1 ? '' : 's'}${c.warmed ? ', after warming the restarted app up' : ''}. Ranges are p25-p75. Query counts are exact; a time change counts only when the ranges do not overlap.</p></section>`;
+  </table><p class="note">Before: ${c.beforeKind === 'recorded' ? `${c.beforeRuns} recorded request${c.beforeRuns === 1 ? '' : 's'} (may include cold ones, so time is not compared)` : `${c.beforeRuns} warm replay${c.beforeRuns === 1 ? '' : 's'} of the old code`}. After: ${c.afterRuns} replay${c.afterRuns === 1 ? '' : 's'}${c.warmed ? ', after warming the restarted app up' : ''}. Times are local replays on this machine, not production latency; ranges are p25-p75. Query counts are exact; a time change counts only when the ranges do not overlap.</p></section>`;
 }
 
 // ---- creating a suggested index from the drawer ----------------------------------------

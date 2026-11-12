@@ -126,7 +126,7 @@ export async function call(name, args, cwd) {
     if (m.otherStatuses) out.push('', `${m.otherStatuses.runs} of ${m.otherStatuses.of} runs answered ${m.otherStatuses.statuses.join(', ')} instead of ${m.now.status} and were left out${m.otherStatuses.statuses.includes(429) ? ' (rate limited)' : ''}.`);
     if (m.restarted) out.push('', 'backlens restarted the app first, so this run is measured fresh like the one it is compared with.');
     out.push('', m.issues.length ? `Issues still in the replayed request:\n${m.issues.map((i, n) => `${n + 1}. ${i.title}${i.sites && i.sites.length ? `  (${i.sites.join(' -> ')})` : ''}`).join('\n')}` : 'No issues in the replayed request.');
-    out.push('', 'Query counts are exact. Times are warm medians; a change counts only when it is at least 1 ms and the p25-p75 ranges do not overlap.', '', 'Last replay:', traceText(m.trace));
+    out.push('', 'Query counts are exact. Times are local replays on this machine (warm medians, recording on), not production latency; a change counts only when it is at least 1 ms and the p25-p75 ranges do not overlap.', '', 'Last replay:', traceText(m.trace));
     return out.join('\n');
   }
 

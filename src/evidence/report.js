@@ -58,7 +58,7 @@ export function reportMarkdown(records, { hours = null } = {}) {
   }
   const pairs = [...byKey.entries()].filter(([, list]) => list.length >= 2);
   if (pairs.length) {
-    out.push('### Measured before → after', '', '| Route | Before | After | Time | Queries |', '|---|---|---|---|---|');
+    out.push('### Measured before → after (local replays)', '', '| Route | Before | After | Time | Queries |', '|---|---|---|---|---|');
     for (const [key, list] of pairs) {
       const a = list[0].now;
       const b = list.at(-1).now;
@@ -66,7 +66,7 @@ export function reportMarkdown(records, { hours = null } = {}) {
       const verdict = !c ? '-' : c.verdict === 'same' ? 'within noise' : `${c.verdict} (${c.pct > 0 ? '+' : ''}${c.pct}%)`;
       out.push(`| \`${key}\` | ${ms(a.ms)} (${a.lo}–${a.hi}) | ${ms(b.ms)} (${b.lo}–${b.hi}) | ${verdict} | ${a.queries} → ${b.queries} |`);
     }
-    out.push('', '_Medians of warm replays on fresh app runs; p25–p75 in brackets. A time change counts only when it is at least 1 ms and the ranges do not overlap._');
+    out.push('', '_Local replays on the developer\'s machine (warm medians on fresh app runs, recording on), not production latency; p25–p75 in brackets. A time change counts only when it is at least 1 ms and the ranges do not overlap._');
   }
   return out.join('\n');
 }

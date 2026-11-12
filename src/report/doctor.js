@@ -19,7 +19,7 @@ export function doctorText(d) {
     const range = (xs, unit) => (Math.min(...xs) === Math.max(...xs) ? `${Math.max(...xs)}${unit}` : `${Math.min(...xs)}-${Math.max(...xs)}${unit}`);
     lines.push(
       '',
-      `Recording adds ${range(ms, ' ms')}${pct.length ? ` (${range(pct, '%')})` : ''} a request here. Before/after comparisons stay fair, since backlens records both sides; absolute times read about that much higher than the app without backlens.`,
+      `Recording adds ${range(ms, ' ms')}${pct.length ? ` (${range(pct, '%')})` : ''} a request here. Before/after comparisons stay fair, since backlens records both sides; absolute times read about that much higher than the app without backlens. All backlens timings are local replays, not production latency.`,
     );
   }
   const bad = d.adapters.filter((a) => a.status !== 'ok');
