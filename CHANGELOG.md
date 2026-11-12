@@ -41,6 +41,7 @@ backlens grows from a query fixer into a check on what every change does to the 
 - **Queries an ORM runs on a leased client** (transactions, as drizzle does) are now recorded. They were missed before.
 - **The index advisor's own queries** are never recorded into a request.
 - **A failing dashboard request** answers 500 instead of crashing the dashboard and the app it runs.
+- **`typescript` is now an optional peer dependency**, so `npx backlens` downloads 23 MB less. The no-model `Promise.all` fix uses the project's own TypeScript; without one, that fix goes to the model.
 - **Code moved into `src/` layers.** Public paths are unchanged: the `backlens` bin, `backlens/register`, root `statusline.js`.
 
 ### Upgrading

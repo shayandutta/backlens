@@ -51,3 +51,9 @@ after, and compare.
 - Anything that touches privacy (what is recorded, sent to a model, or written to disk) needs a note in the PR saying why it is safe.
 
 By contributing you agree your work is released under the [MIT license](LICENSE).
+
+## Releasing
+
+1. Bump `version` in `package.json` (and `package-lock.json` via `npm install --package-lock-only`), add a `CHANGELOG.md` entry.
+2. Merge to `main` with CI green.
+3. Tag and push: `git tag v<version> && git push origin v<version>`. The `release` workflow checks the tag matches `package.json`, runs `check` and the tests, and publishes to npm with provenance (needs the `NPM_TOKEN` repository secret).

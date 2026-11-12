@@ -9,13 +9,18 @@ import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
 
-/** The project's own TypeScript when it has the classic API, otherwise backlens's copy. */
+/**
+ * The project's own TypeScript when it has the classic API, otherwise one installed next to
+ * backlens (an optional peer dependency, so `npx backlens` does not download 23 MB for it), or null.
+ */
 function typescript(root) {
-  try {
-    const ts = createRequire(join(root, 'package.json'))('typescript');
-    if (typeof ts.createSourceFile === 'function') return ts;
-  } catch {}
-  return require('typescript');
+  for (const load of [() => createRequire(join(root, 'package.json'))('typescript'), () => require('typescript')]) {
+    try {
+      const ts = load();
+      if (ts && typeof ts.createSourceFile === 'function') return ts;
+    } catch {}
+  }
+  return null;
 }
 
 /**
@@ -41,6 +46,7 @@ export function promiseAll(root, issue) {
     return { reason: `could not read ${file}` };
   }
   const ts = typescript(root);
+  if (!ts) return { reason: 'TypeScript is not installed in this project, which backlens uses to rewrite the code safely' };
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, /x$/.test(file) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const lineOf = (pos) => sf.getLineAndCharacterOfPosition(pos).line + 1;
 

@@ -21,11 +21,22 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test test/",
-    "check": "node scripts/check-syntax.mjs"
+    "test": "node --test test/*.test.js",
+    "check": "node scripts/check-syntax.mjs",
+    "prepublishOnly": "npm run check && npm test"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^1.6.0",
+    "@anthropic-ai/sdk": "^1.6.0"
+  },
+  "peerDependencies": {
+    "typescript": ">=4.7"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
     "typescript": "^5.9.3"
   },
   "repository": {
