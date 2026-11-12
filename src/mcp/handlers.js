@@ -4,6 +4,7 @@ import { acceptText, diffText } from '../diff/format.js';
 import { readLedger } from '../evidence/ledger.js';
 import { reportMarkdown } from '../evidence/report.js';
 import { doctorText } from '../report/doctor.js';
+import { mutationText } from '../mutate/format.js';
 import { timingText } from '../shared/compare.js';
 import { ago, issueText, ms, plural, traceText } from './format.js';
 import { api, findSessions, NOT_RUNNING } from './session.js';
@@ -130,6 +131,7 @@ export async function call(name, args, cwd) {
     return out.join('\n');
   }
 
+  if (name === 'mutate') return mutationText(await api(session, 'POST', '/api/mutate', { max: args.max, tests: args.tests !== false }).catch((err) => ({ error: err.message })));
   if (name === 'doctor') return doctorText(await api(session, 'GET', '/api/doctor'));
 
   if (name === 'save_login') {

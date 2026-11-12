@@ -73,6 +73,8 @@ export function compareFingerprints(before, after) {
     const now = cls(after.status);
     if (now === 5 && was !== 5) add('broken', `answers ${after.status} (was ${before.status})`);
     else if (now === 4 && was < 4) add('broken', `answers ${after.status} (was ${before.status})${after.status === 401 || after.status === 403 ? '; if the login expired, sign in again and accept' : ''}`);
+    // A refused request that now gets through is an access check gone, not an improvement.
+    else if ((before.status === 401 || before.status === 403) && now < 4) add('broken', `answers ${after.status} (was ${before.status}): a request that was refused now gets through`);
     else if (was >= 4 && now < 4) add('better', `answers ${after.status} (was ${before.status})`);
     else add('changed', `answers ${after.status} (was ${before.status})`);
   }

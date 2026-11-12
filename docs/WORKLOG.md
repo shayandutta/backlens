@@ -5,6 +5,19 @@ Numbers come from real runs; say so when something was not measured.
 
 ---
 
+## 2026-11-13 (night): 0.8 started, mutation lab (branch `v0.8/mutate`)
+
+- **`backlens mutate`:**
+  - Mutants come from guards in the files requests ran through: remove-guard, remove-decorator, boundary.
+  - Each mutant: restart, then the diff and the tests, then an exact restore.
+  - There is a crash marker, and the file is recovered on start.
+- **On oldmonk** (4 mutants, with the tests): all caught, by the tests. Every one was an `@UseGuards(AuthGuard, AdminGuard)` or `@UseGuards(CsrfGuard)` removal. The diff alone did not catch them, because every recorded admin request was authorized. `src` was identical to the backup afterwards.
+- **Found a diff gap:** a 403 that became a 200 was rated *better*. It is now *broken* ("a refused request now gets through").
+- 115 tests.
+- **Next in 0.8:** BullMQ correlation.
+
+---
+
 ## 2026-11-13 (later): 0.7.0 ready; direction past 0.7
 
 - **0.7.0 is prepared on `v0.7/finish` and not released yet.** It includes:

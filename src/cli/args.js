@@ -11,7 +11,7 @@ export function parseArgs(argv) {
   return {
     own,
     command,
-    subcommand: ['test', 'mcp', 'statusline', 'diff', 'accept', 'init', 'hook', 'report', 'doctor'].includes(own[0]) ? own[0] : null,
+    subcommand: ['test', 'mcp', 'statusline', 'diff', 'accept', 'init', 'hook', 'report', 'doctor', 'mutate'].includes(own[0]) ? own[0] : null,
     has: (name) => own.includes(name),
     /** The value after a flag (`--port 7777`), or undefined. */
     flag: (name) => {
@@ -52,6 +52,11 @@ export const HELP = `usage:
   backlens doctor [--json]
       With the dashboard running: which libraries the recorder hooked into (and whether
       each is on a tested version), and what recording costs a request on this app.
+
+  backlens mutate [--max 8] [--no-tests]
+      Mutation lab: breaks one guard at a time (auth checks, access decorators, boundaries)
+      in the code requests ran through, and reports which changes neither the behavior
+      diff nor the tests noticed. Files are put back exactly. Exit 1 on a gap.
 
   backlens report [--since <hours>] [--all]
       Markdown evidence for a pull request: behavior diffs, accepted changes and

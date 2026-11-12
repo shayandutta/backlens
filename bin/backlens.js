@@ -22,7 +22,8 @@ else if (args.subcommand === 'hook' && args.own[1] === 'stop') await import('../
 else if (args.subcommand === 'hook') {
   process.stderr.write('usage: backlens hook stop\n');
   process.exit(1);
-} else if (args.subcommand === 'doctor') await import('../src/cli/doctor.js').then((m) => m.runDoctorCommand({ args, root }));
+} else if (args.subcommand === 'mutate') await import('../src/cli/mutate.js').then((m) => m.runMutateCommand({ args, root }));
+else if (args.subcommand === 'doctor') await import('../src/cli/doctor.js').then((m) => m.runDoctorCommand({ args, root }));
 else if (args.subcommand === 'report') await import('../src/evidence/report.js').then((m) => m.runReport({ args, root }));
 else if (ci) await import('../src/cli/ci.js').then((m) => m.runCi({ args, root, token }));
 else await import('../src/cli/studio.js').then((m) => m.runStudio({ args, root, token }));

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased (0.8)
+
+- **Mutation lab:** `backlens mutate [--max 8] [--no-tests]` (also an MCP tool `mutate`).
+  - In the files real requests ran through, it breaks one guard at a time: removes an `if (…) throw` / error-return check, removes an access decorator (`@UseGuards`, `@Roles`…), or shifts a `>=`/`<=` boundary.
+  - For each, it restarts the app, runs the behavior diff and the tests, and puts the file back exactly.
+  - It reports each change nothing noticed: a gap an agent could fall into silently. Exit 1 on a gap.
+  - An interrupted run's file is restored on the next start.
+- **`diff`:** a refused request (401/403) that now gets through is reported as *broken*, not *better*.
+
 ## 0.7.0
 
 - **Compatibility matrix:** `npm run test:compat`, also run in CI. The recorder runs against real pg (8.11 and the latest 8), drizzle-orm, Kysely, ioredis 5, node-redis 4 and 5, Express 4 and 5, and Fastify 4 and 5, on real Postgres and Redis. Each call must be recorded once, in its request, with the app's code line. It fails on 0.6.0's double count.

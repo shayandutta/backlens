@@ -9,6 +9,7 @@ import { packageManager, readProject } from '../shared/project.js';
 import { loadConfig, projectDir } from '../shared/project-config.js';
 import { createBehavior } from './behavior.js';
 import { createFreshness } from './fresh.js';
+import { recover } from './mutate.js';
 import { accessChecks, json } from './http.js';
 import { createProcesses } from './processes.js';
 import { createReplayer } from './replay.js';
@@ -16,6 +17,7 @@ import accessRoutes from './routes/access.js';
 import aiRoutes from './routes/ai.js';
 import behaviorRoutes from './routes/behavior.js';
 import doctorRoutes from './routes/doctor.js';
+import mutateRoutes from './routes/mutate.js';
 import indexRoutes from './routes/indexes.js';
 import ingestRoutes from './routes/ingest.js';
 import measureRoutes from './routes/measure.js';
@@ -42,6 +44,9 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
   let procs = null;
   let ai = null;
 
+  // A mutation run killed midway leaves one file changed: put it back before anything else.
+  const recovered = recover(root);
+  if (recovered) process.stderr.write(`backlens: put back ${recovered}, left changed by an interrupted mutation run\n`);
   const store = createStore();
   const replayer = createReplayer();
   const checks = accessChecks(token, () => actualPort);
@@ -65,7 +70,7 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
   ctx.access = { profiles, env: () => projectEnv(root), sessions: null };
   ctx.access.sessions = createSessions({ profiles, env: ctx.access.env, appPort: () => (procs ? procs.appPort() : null) });
   ctx.behavior = createBehavior({ root, store, replayer, fresh: ctx.fresh, access: ctx.access });
-  const routes = [ingestRoutes, trafficRoutes, projectRoutes, measureRoutes, behaviorRoutes, doctorRoutes, accessRoutes, indexRoutes, aiRoutes].flatMap((make) => make(ctx));
+  const routes = [ingestRoutes, trafficRoutes, projectRoutes, measureRoutes, behaviorRoutes, doctorRoutes, mutateRoutes, accessRoutes, indexRoutes, aiRoutes].flatMap((make) => make(ctx));
 
   function match(req, pathname) {
     for (const r of routes) {

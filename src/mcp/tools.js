@@ -113,6 +113,13 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
   {
+    name: 'mutate',
+    description:
+      "Mutation lab: are this app's guards protected? Breaks one guard at a time in the code real requests ran through (removes an auth check or access decorator, shifts a >= boundary), restarts the app, runs the behavior diff and the tests, and puts the file back exactly. Reports each change nothing noticed: a gap an agent could fall into silently. Slow (a restart, a diff and a test run per change).",
+    inputSchema: { type: 'object', properties: { max: { type: 'number', description: 'Guard changes to try (default 8, at most 30).' }, tests: { type: 'boolean', description: 'Also run the test script for each (default true).' } } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
     name: 'doctor',
     description:
       "Whether backlens's numbers can be trusted on this app: the libraries the recorder hooked into (with versions, and whether each is on a tested version or shared with another instrumentation tool), and the measured cost of recording a request. Call it when results look odd.",
