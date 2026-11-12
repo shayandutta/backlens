@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -53,6 +54,19 @@ test('the behavior diff takes a baseline, stays quiet, and catches a lost field 
     const clean = await api(session, 'POST', '/api/behavior/diff', {});
     assert.equal(clean.checked, 2);
     assert.deepEqual(clean.results, []);
+
+    // Scoped to the change's reach: outside git it cannot be told, so every route is checked;
+    // with only docs changed, nothing is replayed at all.
+    const unknown = await api(session, 'POST', '/api/behavior/diff', { changed: true });
+    assert.equal(unknown.impact.scope, 'all');
+    assert.equal(unknown.checked, 2);
+    const git = (...a) => execFileSync('git', a, { cwd: root, stdio: 'ignore' });
+    git('init', '-q');
+    git('add', '.');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'x');
+    writeFileSync(join(root, 'README.md'), 'docs');
+    const docs = await api(session, 'POST', '/api/behavior/diff', { changed: true });
+    assert.deepEqual([docs.impact.scope, docs.checked], ['none', 0]);
 
     writeFileSync(join(root, 'mode.txt'), 'lost');
     const lost = await api(session, 'POST', '/api/behavior/diff', {});

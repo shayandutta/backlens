@@ -132,7 +132,7 @@ export async function runStopHook({ stdin, harness = 'claude', cwd = process.cwd
   const started = now();
   let d;
   try {
-    d = await withBudget(api(session, 'POST', '/api/behavior/diff', {}), BUDGET_MS);
+    d = await withBudget(api(session, 'POST', '/api/behavior/diff', { changed: true }), BUDGET_MS);
   } catch (err) {
     d = { error: err.message };
   }

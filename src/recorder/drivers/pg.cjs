@@ -104,19 +104,20 @@ function patchPg(pg) {
     const query = Client.prototype.query;
     Client.prototype.query = function () {
       if (isOwn(arguments[0])) return query.apply(this, arguments);
-      let args = [...arguments];
+      const args = [...arguments];
       // In a write sandbox: the pinned connection runs the app's transaction statements as
-      // savepoints; any other connection used by this request is a leak the dashboard reports.
+      // savepoints (a group: one at a time, each guarded); any other connection used by this
+      // request is a leak the dashboard reports.
       const sb = sandbox.current();
-      if (sb && !insidePool && !sb.closed) {
-        if (this === sb.client) {
-          sb.statements++;
-          args = sandbox.rewriteArgs(sb, args);
-        } else sb.leaked++;
+      if (sb && !insidePool && !sb.closed && this === sb.client) {
+        sb.statements++;
+        const client = this;
+        return recordQuery(sandbox.runner(sb, (a) => query.apply(client, a)), this, args);
       }
+      if (sb && !insidePool && !sb.closed) sb.leaked++;
       // Called by the pool, not the app: either synchronously inside pool.query, or later with no
       // app code on the stack, unless the app leased this client for the current request.
-      const leased = (sb && this === sb.client) || (leases.has(this) && leases.get(this) === storage.getStore());
+      const leased = leases.has(this) && leases.get(this) === storage.getStore();
       if (insidePool || (appFrames().length === 0 && !leased)) return query.apply(this, args);
       return recordQuery(query, this, args);
     };
@@ -148,17 +149,16 @@ function patchPg(pg) {
       if (sb) {
         const pool = this;
         // The same recording, but the query runs on the pinned connection inside the transaction.
-        const pinnedQuery = function (...a) {
-          const cbIndex = a.findIndex((x) => typeof x === 'function');
-          const cb = cbIndex === -1 ? null : a.splice(cbIndex, 1)[0];
-          const p = sandbox.pinned(sb, pool, connect, rawClientQuery).then((c) => {
-            sb.statements++;
-            return rawClientQuery.apply(c, sandbox.rewriteArgs(sb, a));
-          });
-          if (!cb) return p;
-          p.then((res) => cb(null, res), (err) => cb(err));
-          return undefined;
-        };
+        const open = () => sandbox.pinned(sb, pool, connect, rawClientQuery);
+        const pinnedQuery = sandbox.runner(
+          sb,
+          (a) =>
+            open().then((c) => {
+              sb.statements++;
+              return rawClientQuery.apply(c, a);
+            }),
+          open,
+        );
         return recordQuery(pinnedQuery, this, [...arguments]);
       }
       const original = function () {

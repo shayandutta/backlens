@@ -39,6 +39,19 @@ function project(deps) {
  * requests each path in order, and returns { [path]: trace }.
  */
 export async function run({ deps, app, paths }) {
+  const all = await runWith({ deps, app, drive: async (port) => {
+    for (const p of paths) {
+      const r = await fetch(`http://127.0.0.1:${port}${p}`);
+      await r.text();
+    }
+  } });
+  const out = {};
+  for (const t of all) if (!t.replayOf) out[t.url] = t;
+  return out;
+}
+
+/** Like run(), but `drive(port)` sends whatever it wants; every trace reported is returned, replays included. */
+export async function runWith({ deps, app, drive }) {
   const dir = project(deps);
   writeFileSync(join(dir, 'app.js'), app);
   const traces = [];
@@ -60,19 +73,14 @@ export async function run({ deps, app, paths }) {
       child.once('message', resolve);
       child.once('exit', (code) => reject(new Error(`the app exited (${code}) before listening`)));
     });
-    for (const p of paths) {
-      const r = await fetch(`http://127.0.0.1:${port}${p}`);
-      await r.text();
-    }
+    await drive(port);
     // Spans reported after the response (Prisma) and the trace itself arrive just after.
     await new Promise((r) => setTimeout(r, 400));
   } finally {
     child.kill();
     sink.close();
   }
-  const out = {};
-  for (const t of traces) if (!t.replayOf) out[t.url] = t;
-  return out;
+  return traces;
 }
 
 /** The recorded calls of one kind, as their names (lower-cased SQL, upper-cased Redis command + key). */

@@ -5,6 +5,8 @@ import { readLedger } from '../evidence/ledger.js';
 import { reportMarkdown } from '../evidence/report.js';
 import { doctorText } from '../report/doctor.js';
 import { mutationText } from '../mutate/format.js';
+import { raceText } from '../race/format.js';
+import { trialText } from '../trial/format.js';
 import { timingText } from '../shared/compare.js';
 import { ago, issueText, ms, plural, traceText } from './format.js';
 import { api, findSessions, NOT_RUNNING } from './session.js';
@@ -153,7 +155,19 @@ export async function call(name, args, cwd) {
     return lines.join('\n');
   }
 
-  if (name === 'diff') return diffText(await api(session, 'POST', '/api/behavior/diff', { route: args.route, time: args.time === true }).catch(passError));
+  if (name === 'diff') return diffText(await api(session, 'POST', '/api/behavior/diff', { route: args.route, time: args.time === true, changed: args.changed === true }).catch(passError));
+  if (name === 'race') return raceText(await api(session, 'POST', '/api/race', { id: args.id, copies: args.copies }).catch(passError));
+  if (name === 'try_fixes') return trialText(await api(session, 'POST', '/api/trial', { id: args.id, fixes: args.fixes, keep: args.keep === true, tests: args.tests !== false }).catch(passError));
+  if (name === 'memory') {
+    const q = new URLSearchParams();
+    if (typeof args.route === 'string') q.set('route', args.route);
+    if (typeof args.file === 'string') q.set('file', args.file);
+    return (await api(session, 'GET', `/api/memory?${q}`)).text;
+  }
+  if (name === 'remember') {
+    const r = await api(session, 'POST', '/api/memory/note', { text: args.text, route: args.route, file: args.file, forget: args.forget }).catch(passError);
+    return r.error || (r.forgot ? `Removed note ${r.forgot}.` : `Noted as ${r.id} (${r.notes} notes kept for this project).`);
+  }
   if (name === 'accept') return acceptText(await api(session, 'POST', '/api/behavior/accept', Array.isArray(args.routes) ? { routes: args.routes } : {}).catch(passError));
 
   if (name === 'app_logs') {

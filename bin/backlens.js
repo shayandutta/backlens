@@ -23,6 +23,7 @@ else if (args.subcommand === 'hook') {
   process.stderr.write('usage: backlens hook stop\n');
   process.exit(1);
 } else if (args.subcommand === 'mutate') await import('../src/cli/mutate.js').then((m) => m.runMutateCommand({ args, root }));
+else if (['race', 'try', 'memory'].includes(args.subcommand)) await import('../src/cli/labs.js').then((m) => m.runLab({ args, root }));
 else if (args.subcommand === 'doctor') await import('../src/cli/doctor.js').then((m) => m.runDoctorCommand({ args, root }));
 else if (args.subcommand === 'report') await import('../src/evidence/report.js').then((m) => m.runReport({ args, root }));
 else if (ci) await import('../src/cli/ci.js').then((m) => m.runCi({ args, root, token }));

@@ -13,6 +13,7 @@ export function diffText(d) {
   }
   const head = `${d.checked} route${d.checked === 1 ? '' : 's'} checked in ${secs(d.ms)}${d.restarted ? ' (app restarted first for a fresh run)' : ''}`;
   const lines = [];
+  if (d.impact && d.impact.scoped && d.impact.scope === 'none') return `Nothing to check: ${d.impact.why[0] || 'no code that requests run changed'}.`;
   if (!d.results.length) lines.push(`No behavior change: ${head}.`);
   else {
     const counts = [d.broken && `${d.broken} broken`, d.changed && `${d.changed} changed`, d.better && `${d.better} better`].filter(Boolean).join(', ');
@@ -25,10 +26,19 @@ export function diffText(d) {
     if (d.broken) lines.push('✗ items are breaks: fix them, or if the change is intended, accept those routes.');
     else lines.push('If these changes are intended, accept them so the next diff compares with the new behavior.');
   }
+  if (d.impact) lines.push('', impactLine(d.impact));
   if (d.note) lines.push('', d.note);
   if (d.unverifiable) lines.push('', `${d.unverifiable} response field${d.unverifiable === 1 ? ' was' : 's were'} null in every baseline response, so only a missing field or a new type shows there, not a changed value. Use data where they are set to cover them.`);
   if (d.skipped && d.skipped.length) lines.push(...(lines.length > 1 ? [''] : []), ...d.skipped.map((s) => `not checked ${s.route}: ${s.why}`));
   return lines.join('\n');
+}
+
+/** One line on which routes the change can reach, and so which were checked (first). */
+export function impactLine(i) {
+  if (i.scope === 'all') return `Reach of the change: all ${i.of} routes (${i.why[0] || 'unknown'}).`;
+  if (i.scope === 'none') return `Reach of the change: no route (${i.why[0]}).`;
+  const how = i.scoped ? `only those were checked` : `checked first`;
+  return `Reach of the change: ${i.routes} of ${i.of} routes, ${how} (${i.why.slice(0, 3).join('; ')}${i.why.length > 3 ? '; ...' : ''}).`;
 }
 
 export function acceptText(a) {

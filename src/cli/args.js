@@ -11,7 +11,7 @@ export function parseArgs(argv) {
   return {
     own,
     command,
-    subcommand: ['test', 'mcp', 'statusline', 'diff', 'accept', 'init', 'hook', 'report', 'doctor', 'mutate'].includes(own[0]) ? own[0] : null,
+    subcommand: ['test', 'mcp', 'statusline', 'diff', 'accept', 'init', 'hook', 'report', 'doctor', 'mutate', 'race', 'try', 'memory'].includes(own[0]) ? own[0] : null,
     has: (name) => own.includes(name),
     /** The value after a flag (`--port 7777`), or undefined. */
     flag: (name) => {
@@ -33,9 +33,10 @@ export const HELP = `usage:
       For AI editors (Claude Code, Cursor...): an MCP server over stdio that reads the
       running dashboard for this project: issues, requests, replays, logs and tests.
 
-  backlens diff [--route "GET /path"] [--time] [--json]
+  backlens diff [--route "GET /path"] [--changed] [--time] [--json]
       With the dashboard running: replay one read per route and compare with the baseline
       (status, response shape, queries, calls, errors; --time adds coarse timing).
+      --changed: only the routes your uncommitted changes can reach (all when unknown).
       Exit 1 when something broke.
       The first run takes the baseline.
 
@@ -57,6 +58,20 @@ export const HELP = `usage:
       Mutation lab: breaks one guard at a time (auth checks, access decorators, boundaries)
       in the code requests ran through, and reports which changes neither the behavior
       diff nor the tests noticed. Files are put back exactly. Exit 1 on a gap.
+
+  backlens race [--id <request id>] [--copies 5]
+      Concurrency probes: send a recorded write N times one after another, then N at once,
+      in rolled-back transactions; report races (more successes at once), duplicate jobs
+      and failures under concurrency. Exit 1 on a race.
+
+  backlens try <fixes.json> --id <request id> [--keep] [--no-tests]
+      Counterfactual lab: apply each candidate fix ([{ name, edits: [{ file, find, replace }] }])
+      in turn, replay the request, diff and test, put the files back; report the best.
+      --keep applies the winner.
+
+  backlens memory [route | file]
+      What backlens knows about the app, a route ("POST /v1/orders") or a file: code paths,
+      tables, issues, past breaks, gaps, races, measurements and notes.
 
   backlens report [--since <hours>] [--all]
       Markdown evidence for a pull request: behavior diffs, accepted changes and

@@ -18,7 +18,7 @@ export async function runDiff({ args, root }) {
   try {
     out = accept
       ? await api(session, 'POST', '/api/behavior/accept', rest.length ? { routes: rest } : {})
-      : await api(session, 'POST', '/api/behavior/diff', { route: args.flag('--route'), time: args.has('--time') });
+      : await api(session, 'POST', '/api/behavior/diff', { route: args.flag('--route'), time: args.has('--time'), changed: args.has('--changed') });
   } catch (err) {
     out = { error: err.message };
   }

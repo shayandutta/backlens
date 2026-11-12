@@ -1,6 +1,6 @@
 {
   "name": "backlens",
-  "version": "0.7.0",
+  "version": "1.0.0",
   "description": "See what your Node backend really does on every request, catch what a change broke across every route, and prove fixes by replay. A local recorder, dashboard and MCP server, with a stop hook for coding agents.",
   "license": "MIT",
   "type": "module",

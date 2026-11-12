@@ -6,6 +6,7 @@ import { jwtExpired } from '../access/token.js';
 import { ambientWrites, dataWrites, routeOf } from '../analysis/index.js';
 import { compareFingerprints, RANK } from '../diff/compare.js';
 import { fingerprint } from '../diff/fingerprint.js';
+import { changedFiles, impactOf, usageOf } from '../diff/impact.js';
 import { record } from '../evidence/ledger.js';
 import { projectDir } from '../shared/project-config.js';
 import { SAFE_METHODS } from '../shared/replay-policy.js';
@@ -43,7 +44,15 @@ function diskUrl(url) {
   return keys.some((k) => SECRET_QUERY.test(k)) ? { url: url.slice(0, q), secret: true } : { url, secret: false };
 }
 
-export function createBehavior({ root, store, replayer, fresh, access = null }) {
+/** What a route's requests ran through, kept with its baseline entry for the impact-scoped diff. */
+function usesOf(traces) {
+  const u = usageOf(traces);
+  const fileTables = {};
+  for (const [f, t] of u.tablesByFile) fileTables[f] = [...t];
+  return { files: [...u.files], tables: [...u.tables], fileTables };
+}
+
+export function createBehavior({ root, store, replayer, fresh, access = null, changed = changedFiles }) {
   const file = join(projectDir(root), 'behavior.json');
   const payloads = new Map();
   // route -> what the last diff saw, so accepting it right after needs no new replay or restart.
@@ -194,6 +203,7 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
         authed: safe.secret || AUTH_HEADERS.some((h) => c.payload.headers && h in c.payload.headers),
         as: access ? access.sessions.roleOf(c.payload.headers) : null,
         fingerprint: fingerprint(r.traces, ambient),
+        uses: usesOf(r.traces),
         at: Date.now(),
       });
       captured.push(c.route);
@@ -212,12 +222,39 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
    * right after a code change a dev watcher is often still compiling, and on oldmonk that made
    * clean routes look 2-4x slower at random. Status, shape, queries, calls and errors are exact.
    */
-  async function diff({ route = null, time = false } = {}) {
+  /**
+   * The routes the working tree's changes can reach (see src/diff/impact.js), from each entry's
+   * saved usage plus the requests recorded since.
+   */
+  function impact(entries) {
+    const routes = entries.map((e) => {
+      const live = usesOf(store.traces.filter((t) => routeOf(t.method, t.url, t.template) === e.route));
+      const saved = e.uses || { files: [], tables: [], fileTables: {} };
+      return { route: e.route, files: [...new Set([...saved.files, ...live.files])], tables: [...new Set([...saved.tables, ...live.tables])], fileTables: { ...saved.fileTables, ...live.fileTables } };
+    });
+    const tablesByFile = new Map();
+    for (const r of routes) for (const [f, t] of Object.entries(r.fileTables)) tablesByFile.set(f, new Set([...(tablesByFile.get(f) || []), ...t]));
+    return impactOf({ changed: changed(root), routes, tablesByFile });
+  }
+
+  /**
+   * `changed: true` (the agent gate): only the routes the working tree's changes can reach; all of
+   * them when that cannot be told. Without it every route, the reachable ones first.
+   */
+  async function diff({ route = null, time = false, changed: scoped = false } = {}) {
     const started = Date.now();
     const baseline = load();
     if (!baseline || !baseline.entries.length) return { created: true, ...(await capture()) };
-    const entries = baseline.entries.filter((e) => !route || e.route === route);
+    let entries = baseline.entries.filter((e) => !route || e.route === route);
     if (!entries.length) return { error: `${route} is not in the baseline. Use the page once and accept it to add it.` };
+    let reach = null;
+    if (!route) {
+      const imp = impact(entries);
+      reach = { scope: imp.scope, routes: imp.routes.length, of: entries.length, why: imp.why.slice(0, 6), scoped };
+      if (scoped && imp.scope === 'none') return { checked: 0, results: [], skipped: [], broken: 0, changed: 0, better: 0, impact: reach, ms: Date.now() - started };
+      const hit = new Set(imp.routes);
+      entries = scoped && imp.scope === 'some' ? entries.filter((e) => hit.has(e.route)) : [...entries.filter((e) => hit.has(e.route)), ...entries.filter((e) => !hit.has(e.route))];
+    }
     const { port, restarted, run } = await fresh.freshRun({ maxRequests: 0 });
     if (!port) return { error: 'The app did not start. Check app_logs.' };
     const results = [];
@@ -326,6 +363,7 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
       changed: count('changed'),
       better: count('better'),
       baselineAt: baseline.at,
+      impact: reach,
       restarted,
       ms: Date.now() - started,
     };

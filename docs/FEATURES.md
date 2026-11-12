@@ -168,6 +168,18 @@ adapter is untested or shared), MCP `doctor`, an `adapters:` line in `status`.
 | Overhead | up to 2 recorded reads (no data writes), 4 warm-up pairs, then 12 alternating pairs with recording on (`x-backlens-replay`) and off (`x-backlens: skip`), timed from outside the app; medians with p25–p75; not counted as traffic |
 | Measured | oldmonk: +1.7–2.5 ms (17–31%) a request on light routes |
 
+## 5g. Mutation lab, concurrency probes, counterfactual lab, app memory (1.0)
+
+- **Mutation lab** (`src/mutate/`, `src/dashboard/mutate.js`): it breaks one guard at a time, runs the diff and the tests, and restores the file exactly.
+- **Concurrency probes** (`src/race/`, `src/dashboard/race.js`):
+  - The group sandbox lives in `src/recorder/sandbox.cjs` (join/leave/guarded/runner).
+  - Seq vs conc tallies are compared by `raceFindings`.
+  - Jobs are held in the sandbox (`drivers/bullmq.cjs`).
+- **Impact-scoped diff** (`src/diff/impact.js`): `changedFiles` (git), `usageOf` (frames → files and tables), and `impactOf` (none / some / all, with reasons). `behavior.diff({ changed })`; the stop hook uses it.
+- **Counterfactual lab** (`src/trial/`, `src/dashboard/trial.js`): `checkFixes`/`applyFix` (exact, unique replace), `rankFixes`, and `recoverTrial` on start.
+- **App memory** (`src/memory/recall.js`, `src/dashboard/memory.js`): `historyOf(ledger)` and `recallText`, plus notes in `.backlens/memory.json`.
+- **API:** `POST /api/race`, `POST /api/trial`, `GET /api/memory`, `POST /api/memory/note` (`routes/labs.js`; the race and trial labs run one at a time).
+
 ## Measurement (how a before → after is decided)
 
 `src/shared/compare.js`, `src/dashboard/replay.js`, `src/dashboard/routes/measure.js`

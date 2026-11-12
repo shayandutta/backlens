@@ -8,13 +8,20 @@
  *    so the queries a job makes are recorded and checked like a request's. Its `job` field
  *    ({ queue, name, id, attempt }) lets the dashboard link it to the request that queued it.
  *
- * Job data is never recorded: only a hash of it.
+ * Job data is never recorded: only a hash of it. Inside the write sandbox nothing is queued: the
+ * enqueue is recorded (held: true) and a stand-in job returned, since a worker would run the real
+ * job outside the rolled-back transaction.
  */
 
 const { randomUUID } = require('node:crypto');
 const { begin, now, round, storage } = require('../context.cjs');
 const { hashValues } = require('../privacy.cjs');
 const { send } = require('../transport.cjs');
+const sandbox = require('../sandbox.cjs');
+
+let held = 0;
+/** Inside the write sandbox a job is not queued (a worker would run it outside the rollback): a stand-in is returned. */
+const standIn = (name, data) => ({ id: `backlens-held-${++held}`, name, data, backlensHeld: true });
 
 const qname = (q) => (q && (q.name || q.qualifiedName)) || 'queue';
 
@@ -26,6 +33,11 @@ function patchBullmq(mod) {
     const add = Queue.prototype.add;
     Queue.prototype.add = function (name, data) {
       const end = begin('job', `ENQUEUE ${qname(this)}:${name}`, { params: hashValues(data) });
+      if (sandbox.current()) {
+        const job = standIn(name, data);
+        if (end) end({ job: { queue: qname(this), name, id: null, held: true } });
+        return Promise.resolve(job);
+      }
       const p = add.apply(this, arguments);
       if (end && p && typeof p.then === 'function') {
         const queue = qname(this);
@@ -38,6 +50,11 @@ function patchBullmq(mod) {
       Queue.prototype.addBulk = function (jobs) {
         const n = Array.isArray(jobs) ? jobs.length : 0;
         const end = begin('job', `ENQUEUE ${qname(this)} x${n}`, { params: hashValues(Array.isArray(jobs) ? jobs.map((j) => j && j.data) : null) });
+        if (sandbox.current()) {
+          const list = (Array.isArray(jobs) ? jobs : []).map((j) => standIn(j && j.name, j && j.data));
+          if (end) end({ jobs: list.map((j) => ({ queue: qname(this), name: j.name, id: null, held: true })) });
+          return Promise.resolve(list);
+        }
         const p = addBulk.apply(this, arguments);
         if (end && p && typeof p.then === 'function') {
           const queue = qname(this);

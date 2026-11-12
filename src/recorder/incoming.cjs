@@ -52,7 +52,10 @@ function patchServers() {
       // The behavior diff asks for the response's shape (paths and types, no values) on its replays.
       const shapeDone = replayOf && req.headers['x-backlens-shape'] === '1' ? captureBody(res) : null;
       // A replayed write in the sandbox: its Postgres work is rolled back after the response.
-      if (replayOf && req.headers['x-backlens-sandbox'] === '1') trace.sandbox = sandbox.create();
+      // A group of them (the concurrency probes) shares one transaction.
+      const sbHeader = replayOf ? req.headers['x-backlens-sandbox'] : null;
+      if (sbHeader === '1') trace.sandbox = sandbox.create();
+      else if (sbHeader) trace.sandbox = sandbox.join(sbHeader);
       const chunks = [];
       let bodySize = 0;
       const reqEmit = req.emit;
@@ -85,7 +88,7 @@ function patchServers() {
           const sb = trace.sandbox;
           // The state stays on the trace (closed), so late queries from this request are refused;
           // the report carries only what happened.
-          sandbox.close(sb).then((result) => send({ ...trace, sandbox: result }));
+          sandbox.leave(sb).then((result) => send({ ...trace, sandbox: result }));
           return;
         }
         send(trace);

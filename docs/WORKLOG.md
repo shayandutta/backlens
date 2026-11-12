@@ -5,6 +5,24 @@ Numbers come from real runs; say so when something was not measured.
 
 ---
 
+## 2026-11-13 (late night): 1.0.0, all of 0.8–1.0 on branch `v1.0`
+
+- **Concurrency probes (`race`):**
+  - Group sandbox in the recorder (`x-backlens-sandbox: group:<id>:<n>`): n replays share one pinned connection and transaction, each statement is serialized behind its own savepoint, and the app's own BEGIN/COMMIT become no-ops (ROLLBACK is counted).
+  - The verdict compares one-after-another against at-once.
+  - Compat case on real Postgres: racy check-then-decrement caught (confirmed), atomic update quiet, qty unchanged after.
+- **BullMQ in the sandbox:** enqueues are held, not queued.
+- **Impact-scoped diff:**
+  - Changed files come from git; route → files/tables come from recorded frames and are saved in behavior.json.
+  - Unknown reach means all routes; docs and tests mean none.
+  - The stop hook passes `changed: true`.
+- **Counterfactual lab (`try_fixes`):** exact-edit fixes, each one measured, diffed (scoped) and tested, with an exact restore and a crash marker.
+- **App memory (`memory`, `remember`):** recall over the ledger, baseline and traffic, plus notes.
+- **Tests:** 129 unit tests; compat 13/13 locally (Postgres in Docker on 55432, Redis on 56379).
+- **Not run yet on oldmonk:** `race`, `try_fixes`, `memory`. The eval pilot is still not run.
+
+---
+
 ## 2026-11-13 (night): 0.8 started, mutation lab (branch `v0.8/mutate`)
 
 - **`backlens mutate`:**

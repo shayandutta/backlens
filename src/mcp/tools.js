@@ -102,7 +102,11 @@ export const TOOLS = [
       "What your change did to the running app: replays one recorded read per route (up to 30) and compares each with the baseline: status, response shape (fields and types, never values), queries, Redis and outgoing calls, errors and new performance issues (time only when asked: it is noisy right after a change; use measure_request for timing). ✗ broken (failing status, lost field, changed type, new error), ~ changed, ↑ better. Silent when nothing changed. The first call takes the baseline; call it again after changing code. Restarts the app first when needed so timings compare fresh against fresh.",
     inputSchema: {
       type: 'object',
-      properties: { route: { type: 'string', description: 'Only this route, like "GET /v1/reviews".' }, time: { type: 'boolean', description: 'Also flag routes more than 2x and 10 ms slower (coarse).' } },
+      properties: {
+        route: { type: 'string', description: 'Only this route, like "GET /v1/reviews".' },
+        time: { type: 'boolean', description: 'Also flag routes more than 2x and 10 ms slower (coarse).' },
+        changed: { type: 'boolean', description: 'Only the routes your uncommitted changes can reach (from the code lines and tables real requests used); all routes when that cannot be told. Faster; what the stop hook uses.' },
+      },
     },
     annotations: { readOnlyHint: true },
   },
@@ -118,6 +122,56 @@ export const TOOLS = [
       "Mutation lab: are this app's guards protected? Breaks one guard at a time in the code real requests ran through (removes an auth check or access decorator, shifts a >= boundary), restarts the app, runs the behavior diff and the tests, and puts the file back exactly. Reports each change nothing noticed: a gap an agent could fall into silently. Slow (a restart, a diff and a test run per change).",
     inputSchema: { type: 'object', properties: { max: { type: 'number', description: 'Guard changes to try (default 8, at most 30).' }, tests: { type: 'boolean', description: 'Also run the test script for each (default true).' } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: 'race',
+    description:
+      'Concurrency probes: replays a recorded write (POST, PUT, PATCH, DELETE) several times one after another, then the same number at once, each set in a rolled-back transaction (nothing is kept, no job is queued). Reports when more copies succeed at once than one after another (a check-then-act race: overselling, double spending, duplicate sign-ups), duplicate jobs, extra rows written, or failures only under concurrency. Without an id, probes the newest recorded writes (up to 3 routes).',
+    inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'A recorded write request id from list_requests.' }, copies: { type: 'number', description: 'Copies per set (default 5, 2-20).' } } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: 'try_fixes',
+    description:
+      "Counterfactual lab: give 1-4 candidate fixes for one recorded request (usually an issue's example); backlens applies each in turn, restarts the app, replays the request (queries, warm median time, status, issues), diffs the routes the fix can reach and runs the tests, then puts the files back exactly. Reports the best fix (fewer queries, or faster beyond noise, with nothing broken). keep: true applies the winner. Propose real alternatives (a join, a batched IN query, a cache) rather than one fix three times.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The recorded request the fixes are for.' },
+        fixes: {
+          type: 'array',
+          description: 'The candidates.',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Short name, like "join" or "batch by id".' },
+              edits: {
+                type: 'array',
+                items: { type: 'object', properties: { file: { type: 'string', description: 'Path from the project root.' }, find: { type: 'string', description: 'Exact text, occurring once in the file.' }, replace: { type: 'string' } }, required: ['file', 'find', 'replace'] },
+              },
+            },
+            required: ['name', 'edits'],
+          },
+        },
+        keep: { type: 'boolean', description: 'Apply the best fix to the code afterwards (default false).' },
+        tests: { type: 'boolean', description: 'Run the test script for each fix (default true).' },
+      },
+      required: ['id', 'fixes'],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: 'memory',
+    description:
+      'What backlens has learned about this app across sessions: for a route, the code it runs, its tables and the routes sharing them, its numbers, open issues (with confidence), and its history (breaks caught, changes accepted, measurements, races, tried fixes) plus notes; for a file, the routes that run it and past failures around it. Without arguments, an overview. Call it before changing a route or file.',
+    inputSchema: { type: 'object', properties: { route: { type: 'string', description: 'Like "POST /v1/orders".' }, file: { type: 'string', description: 'Path from the project root.' } } },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'remember',
+    description: 'Leaves a note in the app memory for later sessions (a rule, a trap, why something is the way it is), optionally tied to a route or file. Plain text, kept in .backlens/memory.json; never put secrets in it. forget: a note id removes it.',
+    inputSchema: { type: 'object', properties: { text: { type: 'string' }, route: { type: 'string' }, file: { type: 'string' }, forget: { type: 'string', description: 'A note id (like n3) to remove instead.' } } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   },
   {
     name: 'doctor',

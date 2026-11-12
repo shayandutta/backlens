@@ -165,6 +165,11 @@ runs with no false alarm; the eval pilot run at least once.
 
 ## After 0.7: verify the consequences, don't trust the change
 
+Status (2026-11-13): everything planned for 0.8, 0.9 and 1.0 below shipped together as **1.0.0**.
+The race and BullMQ "done when" are met by compat cases on real Postgres and Redis. The
+counterfactual lab and app memory are covered by unit tests, but have not been run on a real app
+yet. The eval (scripts/eval) has still not been run.
+
 Direction (2026-11-13): backlens becomes the layer that understands what the app actually does,
 predicts what a change could affect, experiments safely, and proves the result. Not "first" or
 "only" (Keploy, mutation testers and agent-verification tools exist); the difference is one local

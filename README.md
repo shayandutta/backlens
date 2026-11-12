@@ -95,6 +95,10 @@ Keep `npx backlens@latest` running in the server folder; the MCP server reads th
 | `accept` | take intended changes into that baseline |
 | `save_login` | save how to sign in as a role (from a recorded sign-in), so `as: "admin"` works everywhere |
 | `report` | Markdown evidence for a pull request: breaks caught, changes accepted, measured before → after |
+| `race` | concurrency probes: a recorded write sent N times one after another, then N at once, rolled back; reports races, duplicate jobs, failures under concurrency |
+| `try_fixes` | counterfactual lab: 1–4 candidate fixes for one request, each applied, measured, diffed and tested, then put back; the best is reported (or kept) |
+| `memory`, `remember` | what backlens knows about a route or file across sessions (code, tables, issues, past breaks, gaps, races), plus notes |
+| `mutate`, `doctor` | mutation lab (which guard changes nothing notices); whether backlens's numbers can be trusted on this app |
 | `usage` | what the work cost: tokens and dollars for this prompt, the session and the last 30 days |
 
 A typical loop: *list_issues → get_request → measure (before) → edit → measure again → run_tests → diff*. On a sample N+1 that went from 6 queries and 6.7 ms to 2 queries and 1.6 ms, checked by replay. Writes are never replayed, and parameter values never reach the agent.
@@ -178,12 +182,24 @@ measure_url { url: "/v1/admin/users", as: "admin" }
 npx backlens init claude
 ```
 
-- **What it adds:** the MCP server, plus a stop hook. When the agent finishes a turn that changed files, the hook runs `diff`.
+- **What it adds:** the MCP server, plus a stop hook. When the agent finishes a turn that changed files, the hook runs `diff` on the routes the change can reach. Those are routes whose recorded calls ran a changed file or touch a table it queries. When that can't be told, every route is checked.
 - **On a break:** the agent is sent back once with the reason (`✗ GET /v1/me/orders answers 500`).
 - **On other changes:** they are noted and accepted.
 - **When nothing changed:** it says nothing.
 - **When backlens is not running:** it does nothing.
 - **Undo:** `--uninstall`.
+
+### Races, fixes side by side, and memory
+
+```
+npx backlens race                 # concurrency probes on the newest recorded writes
+npx backlens try fixes.json --id <request id> [--keep]
+npx backlens memory "POST /v1/orders"
+```
+
+- **`race`:** sends a recorded write 5 times one after another, then 5 at once, each set in one rolled-back transaction. If more get through at once (two buyers for the last seat), it's a check-then-act race. Jobs the copies queue are held, never sent to a worker.
+- **`try`:** applies each candidate fix in turn, replays the request, diffs and tests, and puts the files back. It reports which fix used the fewest queries or was faster beyond noise, with nothing broken.
+- **`memory`:** what backlens has learned about a route or file across sessions: the code it runs, the tables it shares, past breaks, mutation gaps, races, measurements and notes.
 
 ### Evidence for the PR
 

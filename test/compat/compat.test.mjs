@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { allAttributed, calls, env, run } from './harness.mjs';
+import { randomUUID } from 'node:crypto';
+import { tally, raceFindings } from '../../src/race/verdict.js';
+import { allAttributed, calls, env, run, runWith } from './harness.mjs';
 
 /**
  * The compatibility matrix (`npm run test:compat`): the recorder against real libraries on real
@@ -169,5 +171,62 @@ const routes = { '/enqueue': async () => { await queue.add('welcome', { n: 1 }, 
     assert.equal(run1.job.id, enq.job.id, 'linked to the request by job id');
     assert.equal(run1.status, 200);
     assert.deepEqual(calls(run1, 'redis'), ['GET backlens:compat:job:1'], "the job's own calls are recorded in its trace");
+  });
+});
+
+describe('Concurrency probes', { skip: !env.pg && 'PG_URL not set' }, () => {
+  test('a check-then-decrement is caught racing; the atomic version is not; the database ends as it started', async () => {
+    const T = `backlens_compat_stock_${process.pid}`;
+    const app = `const http = require('node:http');
+const { Pool } = require('pg');
+const pool = new Pool({ connectionString: process.env.PG_URL, max: 4 });
+const ready = pool.query('create table if not exists ${T} (id int primary key, qty int not null)').then(() => pool.query('insert into ${T} values (1, 1) on conflict (id) do update set qty = 1'));
+const routes = {
+  '/buy-racy': async () => {
+    const { rows } = await pool.query('select qty from ${T} where id = 1');
+    if (rows[0].qty < 1) return 409;
+    await pool.query('update ${T} set qty = qty - 1 where id = 1');
+    return 200;
+  },
+  '/buy-atomic': async () => ((await pool.query('update ${T} set qty = qty - 1 where id = 1 and qty > 0')).rowCount ? 200 : 409),
+  '/qty': async () => 200 + (await pool.query('select qty from ${T} where id = 1')).rows[0].qty,
+  '/drop': async () => (await pool.query('drop table ${T}'), 200),
+};
+http.createServer(async (req, res) => {
+  await ready;
+  try { res.statusCode = await routes[req.url](); } catch (e) { res.statusCode = 500; }
+  res.end();
+}).listen(0, function () { process.send(this.address().port); });`;
+    const sets = {};
+    let qtyAfter = null;
+    const drive = async (port) => {
+      const send = (path, group) => {
+        const id = randomUUID();
+        (sets[group.name] ||= []).push(id);
+        return fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: { 'x-backlens-replay': id, 'x-backlens-sandbox': `group:${group.id}:5` } }).then((r) => r.text());
+      };
+      for (const path of ['/buy-racy', '/buy-atomic']) {
+        const seq = { name: `${path} seq`, id: randomUUID() };
+        for (let i = 0; i < 5; i++) await send(path, seq);
+        const conc = { name: `${path} conc`, id: randomUUID() };
+        await Promise.all(Array.from({ length: 5 }, () => send(path, conc)));
+      }
+      await new Promise((r) => setTimeout(r, 300));
+      qtyAfter = (await fetch(`http://127.0.0.1:${port}/qty`)).status - 200;
+      await fetch(`http://127.0.0.1:${port}/drop`);
+    };
+    const traces = await runWith({ deps: { pg: '^8' }, app, drive });
+    const of = (name) => traces.filter((t) => sets[name].includes(t.replayOf));
+    for (const name of Object.keys(sets)) {
+      const final = of(name).map((t) => t.sandbox).filter((s) => s && s.final);
+      assert.equal(final.length, 1, `${name}: one copy reports the rollback`);
+      assert.deepEqual([final[0].rolledBack, final[0].leaked], [true, 0], `${name}: rolled back, nothing outside`);
+    }
+    const racy = raceFindings(tally(of('/buy-racy seq')), tally(of('/buy-racy conc')));
+    assert.deepEqual([tally(of('/buy-racy seq')).ok, tally(of('/buy-racy seq')).refused], [1, 4], 'one after another: one sale, then sold out');
+    assert.equal(racy[0] && racy[0].kind, 'race', 'at once: more than one sale');
+    assert.equal(racy[0].confidence, 'confirmed');
+    assert.deepEqual(raceFindings(tally(of('/buy-atomic seq')), tally(of('/buy-atomic conc'))), [], 'the atomic update holds');
+    assert.equal(qtyAfter, 1, 'every probe was rolled back');
   });
 });

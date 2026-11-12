@@ -16,7 +16,7 @@ export default function behaviorRoutes({ behavior }) {
         json(res, 200, { last: behavior.lastDiff(), baseline: b ? { routes: b.entries.length, at: b.at } : null });
       },
     },
-    { method: 'POST', path: '/api/behavior/diff', handle: one((body) => behavior.diff({ route: body && typeof body.route === 'string' ? body.route : null, time: Boolean(body && body.time) })) },
+    { method: 'POST', path: '/api/behavior/diff', handle: one((body) => behavior.diff({ route: body && typeof body.route === 'string' ? body.route : null, time: Boolean(body && body.time), changed: Boolean(body && body.changed) })) },
     {
       method: 'POST',
       path: '/api/behavior/accept',

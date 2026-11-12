@@ -18,6 +18,8 @@ import aiRoutes from './routes/ai.js';
 import behaviorRoutes from './routes/behavior.js';
 import doctorRoutes from './routes/doctor.js';
 import mutateRoutes from './routes/mutate.js';
+import labRoutes from './routes/labs.js';
+import { recoverTrial } from './trial.js';
 import indexRoutes from './routes/indexes.js';
 import ingestRoutes from './routes/ingest.js';
 import measureRoutes from './routes/measure.js';
@@ -47,6 +49,8 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
   // A mutation run killed midway leaves one file changed: put it back before anything else.
   const recovered = recover(root);
   if (recovered) process.stderr.write(`backlens: put back ${recovered}, left changed by an interrupted mutation run\n`);
+  const trialFiles = recoverTrial(root);
+  if (trialFiles.length) process.stderr.write(`backlens: put back ${trialFiles.join(', ')}, left changed by an interrupted counterfactual run\n`);
   const store = createStore();
   const replayer = createReplayer();
   const checks = accessChecks(token, () => actualPort);
@@ -70,7 +74,7 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
   ctx.access = { profiles, env: () => projectEnv(root), sessions: null };
   ctx.access.sessions = createSessions({ profiles, env: ctx.access.env, appPort: () => (procs ? procs.appPort() : null) });
   ctx.behavior = createBehavior({ root, store, replayer, fresh: ctx.fresh, access: ctx.access });
-  const routes = [ingestRoutes, trafficRoutes, projectRoutes, measureRoutes, behaviorRoutes, doctorRoutes, mutateRoutes, accessRoutes, indexRoutes, aiRoutes].flatMap((make) => make(ctx));
+  const routes = [ingestRoutes, trafficRoutes, projectRoutes, measureRoutes, behaviorRoutes, doctorRoutes, mutateRoutes, labRoutes, accessRoutes, indexRoutes, aiRoutes].flatMap((make) => make(ctx));
 
   function match(req, pathname) {
     for (const r of routes) {

@@ -1,6 +1,32 @@
 # Changelog
 
-## Unreleased (0.8)
+## 1.0.0
+
+backlens now checks what a change does, not just what a request does: races under concurrency,
+the routes a change can reach, fixes tried side by side, and a memory of the app across sessions.
+
+- **Concurrency probes:** `backlens race [--id] [--copies 5]` (also an MCP tool `race`).
+  - A recorded write is sent N times one after another, then N times at once.
+  - Each set runs in one shared, rolled-back transaction, so the copies see each other's writes, as on a real database. Their statements interleave one at a time, each behind its own savepoint, so one failing statement fails only itself.
+  - It reports when more copies succeed at once than one after another (a check-then-act race: overselling, double spending, duplicate sign-ups). It also reports duplicate jobs, extra rows written, and 5xx errors that only happen under concurrency. No app knowledge is needed: the one-after-another run is the app's own answer.
+  - Code using `SELECT … FOR UPDATE` or advisory locks is only rated *check*: the shared connection holds no locks against itself.
+  - **Checked on real Postgres** (compat case): a check-then-decrement is caught (several sales of the last item), the atomic `UPDATE … WHERE qty > 0` is not, and the row is unchanged afterwards.
+- **Jobs in the sandbox are held:** inside the write sandbox, BullMQ `add`/`addBulk` is recorded but not queued (a stand-in job is returned), since a worker would run it outside the rollback.
+- **Impact-scoped diff:** `diff --changed` (MCP `diff` with `changed: true`).
+  - It checks only the routes your uncommitted changes can reach: routes whose recorded calls ran a changed file, plus routes that touch the tables the changed code queries.
+  - Config, dependency, schema or migration changes, or a file no request ran, widen it to all routes. Docs and tests reach none.
+  - The stop hook uses it, so a turn that only touched docs replays nothing.
+  - Without `--changed`, the routes in reach are checked first. Every diff says what the change can reach and why.
+  - Baseline entries now keep the files and tables each route used.
+- **Counterfactual lab:** MCP tool `try_fixes`; on the command line `backlens try <fixes.json> --id <request> [--keep]`.
+  - It takes 1–4 candidate fixes for one request, as exact edits. For each one it applies the edits, restarts the app, replays the request (queries, warm median with p25–p75, status, issues), diffs the routes the fix can reach, runs the tests, and puts the files back exactly.
+  - Best fix: no break, same status, tests pass, then fewest queries, then faster beyond noise. `keep` applies the winner.
+  - An interrupted run's files are restored on the next start.
+- **App memory:** MCP tools `memory` and `remember`; on the command line `backlens memory [route | file]`.
+  - **For a route:** the code it runs, its tables and the routes sharing them, its numbers, open issues with confidence, and its history (breaks caught, changes accepted, measurements, races, fixes tried).
+  - **For a file:** the routes that run it and the failures around it, mutation gaps included.
+  - **Notes** that agents or people leave are kept in `.backlens/memory.json` (mode 600).
+  - It is built from the evidence ledger, the baseline and recorded traffic, so it carries over between sessions.
 
 - **Mutation lab:** `backlens mutate [--max 8] [--no-tests]` (also an MCP tool `mutate`).
   - In the files real requests ran through, it breaks one guard at a time: removes an `if (…) throw` / error-return check, removes an access decorator (`@UseGuards`, `@Roles`…), or shifts a `>=`/`<=` boundary.

@@ -33,3 +33,30 @@ test('a request links to the job runs it queued, and a job run back to its reque
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('inside the write sandbox a job is recorded but not queued: a worker would run it outside the rollback', async () => {
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const { patchBullmq } = require('../src/recorder/drivers/bullmq.cjs');
+  const { storage } = require('../src/recorder/context.cjs');
+  const sandbox = require('../src/recorder/sandbox.cjs');
+  let queued = 0;
+  class Queue {
+    constructor(name) {
+      this.name = name;
+    }
+    async add(name, data) {
+      queued++;
+      return { id: '1', name, data };
+    }
+  }
+  patchBullmq({ Queue });
+  const q = new Queue('mail');
+  const trace = { id: 't', spans: [], sandbox: sandbox.create() };
+  const job = await storage.run(trace, () => q.add('welcome', { to: 'x' }));
+  assert.equal(queued, 0, 'nothing reached the queue');
+  assert.match(job.id, /^backlens-held-/);
+  const plain = await storage.run({ id: 'u', spans: [] }, () => q.add('welcome', {}));
+  assert.equal(plain.id, '1');
+  assert.equal(queued, 1, 'outside the sandbox it is queued as usual');
+});
