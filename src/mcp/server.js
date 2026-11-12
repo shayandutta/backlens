@@ -17,6 +17,8 @@ import { VERSION } from '../shared/version.js';
 const PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
 export async function runMcp({ cwd = process.cwd(), args = [] } = {}) {
+  // stdout is the protocol: errors go to stderr, and a stray rejection must not drop the editor's connection.
+  process.on('unhandledRejection', (err) => process.stderr.write(`backlens mcp: unexpected error: ${(err && err.message) || err}\n`));
   // Editors that start servers outside the project can pass it: --root ${workspaceFolder}.
   const r = args.indexOf('--root');
   if (r !== -1 && args[r + 1]) cwd = resolve(args[r + 1]);

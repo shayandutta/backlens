@@ -14,6 +14,8 @@ const { storage } = require('./context.cjs');
 const { post } = require('./transport.cjs');
 
 const MAX_EXPLAINS = 200;
+/** backlens's own queries carry this tag, so the pg patch never records them into a request. */
+const own = (text, values) => ({ text, values, __backlens: true });
 let pool = null;
 let off = false;
 const explained = new Set();
@@ -57,20 +59,20 @@ async function advise(p, text) {
   const prefix = /\$\d/.test(text) ? 'EXPLAIN (GENERIC_PLAN, VERBOSE, FORMAT JSON) ' : 'EXPLAIN (VERBOSE, FORMAT JSON) ';
   let plan;
   try {
-    plan = (await p.query(prefix + text)).rows[0]['QUERY PLAN'][0].Plan;
+    plan = (await p.query(own(prefix + text))).rows[0]['QUERY PLAN'][0].Plan;
   } catch (err) {
     if (/GENERIC_PLAN/i.test(String(err && err.message))) off = true;
     return;
   }
   for (const scan of seqScans(plan)) {
     const { rows } = await p.query(
-      `select c.reltuples::bigint as rows,
+      own(`select c.reltuples::bigint as rows,
               coalesce((select json_agg(a.attname) from pg_index i
                         join pg_attribute a on a.attrelid = i.indrelid and a.attnum = i.indkey[0]
                         where i.indrelid = c.oid), '[]'::json) as leading
          from pg_class c join pg_namespace n on n.oid = c.relnamespace
         where c.relname = $1 and n.nspname = $2`,
-      [scan.table, scan.schema],
+      [scan.table, scan.schema]),
     );
     if (!rows[0]) continue;
     const leading = rows[0].leading || [];
@@ -79,7 +81,7 @@ async function advise(p, text) {
     // the rows). An index on a column with a handful of values rarely beats reading the table.
     let distinct = {};
     try {
-      const st = await p.query('select attname, n_distinct from pg_stats where schemaname = $1 and tablename = $2 and attname = any($3)', [scan.schema, scan.table, scan.columns]);
+      const st = await p.query(own('select attname, n_distinct from pg_stats where schemaname = $1 and tablename = $2 and attname = any($3)', [scan.schema, scan.table, scan.columns]));
       distinct = Object.fromEntries(st.rows.map((r) => [r.attname, Number(r.n_distinct)]));
     } catch {}
     post('/advice', { sql: text, table: scan.table, schema: scan.schema, columns: scan.columns, sort: scan.sort, rows: Math.max(0, Number(rows[0].rows)), distinct });
@@ -103,7 +105,7 @@ async function indexCommand(body) {
   if (!pool) throw new Error('The app has not used Postgres yet. Use the page once, then try again.');
   const p = pool;
   if (body.action === 'info') {
-    const { rows } = await p.query('select current_database() as database, inet_server_addr()::text as address, inet_server_port() as port');
+    const { rows } = await p.query(own('select current_database() as database, inet_server_addr()::text as address, inet_server_port() as port'));
     const o = p.options || {};
     let host = o.host;
     try {
@@ -120,10 +122,9 @@ async function indexCommand(body) {
     const cols = columns.map((c) => `${q(c.name)}${c.desc ? ' DESC' : ''}`).join(', ');
     // CONCURRENTLY builds without blocking writes; it cannot run inside a transaction, so a
     // plain pool query (its own connection, autocommit) is used.
-    await p.query(`CREATE INDEX CONCURRENTLY IF NOT EXISTS ${q(name)} ON ${q(schema)}.${q(table)} (${cols})`);
+    await p.query(own(`CREATE INDEX CONCURRENTLY IF NOT EXISTS ${q(name)} ON ${q(schema)}.${q(table)} (${cols})`));
     const { rows } = await p.query(
-      `select i.indisvalid as valid from pg_class c join pg_index i on i.indexrelid = c.oid join pg_namespace n on n.oid = c.relnamespace where c.relname = $1 and n.nspname = $2`,
-      [name, schema],
+      own(`select i.indisvalid as valid from pg_class c join pg_index i on i.indexrelid = c.oid join pg_namespace n on n.oid = c.relnamespace where c.relname = $1 and n.nspname = $2`, [name, schema]),
     );
     if (!rows[0] || !rows[0].valid) throw new Error('Postgres did not finish building the index. Drop it and try again.');
     // Can Postgres use it for the query that showed the issue? On a small table it still
@@ -132,22 +133,22 @@ async function indexCommand(body) {
     if (typeof body.sql === 'string' && explained.has(body.sql)) {
       const client = await p.connect();
       try {
-        await client.query('BEGIN');
-        await client.query('SET LOCAL enable_seqscan = off');
+        await client.query(own('BEGIN'));
+        await client.query(own('SET LOCAL enable_seqscan = off'));
         const prefix = /\$\d/.test(body.sql) ? 'EXPLAIN (GENERIC_PLAN, FORMAT JSON) ' : 'EXPLAIN (FORMAT JSON) ';
-        const plan = JSON.stringify((await client.query(prefix + body.sql)).rows[0]['QUERY PLAN']);
+        const plan = JSON.stringify((await client.query(own(prefix + body.sql))).rows[0]['QUERY PLAN']);
         usable = plan.includes(`"Index Name":"${name}"`);
       } catch {
         usable = null;
       } finally {
-        await client.query('ROLLBACK').catch(() => {});
+        await client.query(own('ROLLBACK')).catch(() => {});
         client.release();
       }
     }
     return { created: true, usable };
   }
   if (body.action === 'drop') {
-    await p.query(`DROP INDEX CONCURRENTLY IF EXISTS ${q(schema)}.${q(name)}`);
+    await p.query(own(`DROP INDEX CONCURRENTLY IF EXISTS ${q(schema)}.${q(name)}`));
     return { dropped: true };
   }
   throw new Error('Unknown action.');

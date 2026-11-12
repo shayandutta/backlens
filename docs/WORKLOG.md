@@ -5,6 +5,35 @@ Numbers come from real runs; say so when something was not measured.
 
 ---
 
+## 2026-11-12 (release): 0.6.0 hardening (branch `release/0.6.0`)
+
+### Done
+
+- **Transactions were not recorded.**
+  - **Gap:** queries an ORM ran on a client from `pool.connect()` went unrecorded. A real drizzle transaction on oldmonk showed only the query before it.
+  - **Cause:** drizzle drives the client from callbacks that lose the async stack, so no app frame was seen.
+  - **Fix:** clients the app leases inside a request are recorded for that request only. `pool.query`'s own connect is excluded, so nothing is counted twice.
+  - **Check:** probed with oldmonk's drizzle, pg and dev DB (before: `select 1` only; after: `select 1, begin, select 2, select 3, commit`). A regression test fails without the fix and passes with it.
+- **An older leak:** the index advisor's own `EXPLAIN`s could be recorded into a request when pg-pool resumed them in that request's context. The advisor now tags its queries, and the pg patch skips tagged ones.
+- **Dashboard crash:** a handler that threw would crash the whole dashboard on Node 20, taking down the app it runs. Requests now answer 500 instead. The dashboard and the MCP server log stray rejections instead of exiting. Bad URLs answer 400.
+- **Release:** version 0.6.0, `CHANGELOG.md` (shipped in the package), new description and keywords, lockfile synced.
+- **Dashboard API check:**
+  - every endpoint `ui.html` uses answers correctly on oldmonk (12 GET and 2 POST checked)
+  - the page and its script load and parse
+  - The browser extension was not connected, so nobody has clicked through the page since the refactor. This is still open.
+
+### Checked
+
+- 90 tests pass; 118 files parse.
+- `npm pack`: 106 files, no tests or scripts.
+
+### Open, by choice
+
+- `typescript` (~20 MB) and `@anthropic-ai/sdk` stay runtime dependencies. They are loaded lazily, and the project's own TypeScript is used first. Making them optional would shrink `npx` installs and is worth doing.
+- The eval pilot still needs to be run by the user (the permission classifier blocked it).
+
+---
+
 ## 2026-11-12 (last): Phases 3–6 built and run (branch `phase3/access-broker`)
 
 The code was written while the machine was overloaded (load average about 13 from other work), with nothing run. It was all run afterwards; timings from this session are void, and the checks below are not affected by load.

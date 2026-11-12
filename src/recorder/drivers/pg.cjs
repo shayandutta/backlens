@@ -5,13 +5,35 @@
  * later, in the context of whichever request freed a connection, and is skipped.
  */
 
-const { begin } = require('../context.cjs');
+const { begin, storage } = require('../context.cjs');
 const { appFrames } = require('../frames.cjs');
 const { maybeAdvise, usePool } = require('../index-advisor.cjs');
 const { hashValues, paramPrints, resultPrints } = require('../privacy.cjs');
 const sandbox = require('../sandbox.cjs');
 
 let insidePool = false;
+// Clients the app leased with pool.connect() inside a request -> that request's trace. An ORM
+// drives such a client (a transaction) from microtasks with no app code on the stack; its queries
+// are still the app's, so they are recorded for that request (and only that one).
+const leases = new WeakMap();
+
+/** backlens's own queries (the index advisor) are tagged and never recorded or sandboxed. */
+const isOwn = (config) => Boolean(config && typeof config === 'object' && config.__backlens);
+
+function lease(client) {
+  const trace = storage.getStore();
+  if (!client || !trace) return client;
+  leases.set(client, trace);
+  if (!client.__backlensRelease) {
+    const release = client.release;
+    client.__backlensRelease = true;
+    client.release = function () {
+      leases.delete(client);
+      return release.apply(this, arguments);
+    };
+  }
+  return client;
+}
 
 /** App helpers that replace pool.query (timing, logging) are not where the query came from. */
 function pastWrappers(frames) {
@@ -79,6 +101,7 @@ function patchPg(pg) {
     Client.prototype.__backlens = true;
     const query = Client.prototype.query;
     Client.prototype.query = function () {
+      if (isOwn(arguments[0])) return query.apply(this, arguments);
       let args = [...arguments];
       // In a write sandbox: the pinned connection runs the app's transaction statements as
       // savepoints; any other connection used by this request is a leak the dashboard reports.
@@ -89,8 +112,10 @@ function patchPg(pg) {
           args = sandbox.rewriteArgs(sb, args);
         } else sb.leaked++;
       }
-      // Called by the pool, not the app: either synchronously inside pool.query, or later with no app code on the stack.
-      if (insidePool || appFrames().length === 0) return query.apply(this, args);
+      // Called by the pool, not the app: either synchronously inside pool.query, or later with no
+      // app code on the stack, unless the app leased this client for the current request.
+      const leased = (sb && this === sb.client) || (leases.has(this) && leases.get(this) === storage.getStore());
+      if (insidePool || (appFrames().length === 0 && !leased)) return query.apply(this, args);
       return recordQuery(query, this, args);
     };
   }
@@ -100,7 +125,12 @@ function patchPg(pg) {
     const connect = Pool.prototype.connect;
     Pool.prototype.connect = function (cb) {
       const sb = sandbox.current();
-      if (!sb) return connect.apply(this, arguments);
+      if (!sb) {
+        // pool.query connects for itself (insidePool): not the app's lease.
+        if (insidePool || !storage.getStore()) return connect.apply(this, arguments);
+        if (typeof cb === 'function') return connect.call(this, (err, client, done) => cb(err, lease(client), done && ((e) => (leases.delete(client), done(e)))));
+        return connect.apply(this, arguments).then(lease);
+      }
       // The request's pinned connection, lent out; release() keeps it open for the rollback.
       const p = sandbox.pinned(sb, this, connect, rawClientQuery).then(sandbox.lease);
       if (typeof cb !== 'function') return p;
@@ -108,6 +138,7 @@ function patchPg(pg) {
       return undefined;
     };
     Pool.prototype.query = function () {
+      if (isOwn(arguments[0])) return query.apply(this, arguments);
       usePool(this);
       const sb = sandbox.current();
       if (sb) {

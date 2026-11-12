@@ -14,6 +14,8 @@ const PORTS = Array.from({ length: 20 }, (_, i) => 7777 + i);
  * `backlens mcp` find this dashboard.
  */
 export async function runStudio({ args, root, token }) {
+  // A stray rejection must not stop the dashboard and, with it, the app it runs.
+  process.on('unhandledRejection', (err) => process.stderr.write(`backlens: unexpected error: ${(err && err.stack) || err}\n`));
   const chosen = args.flag('--port');
   const ports = chosen ? [Number(chosen)] : PORTS;
   let server;

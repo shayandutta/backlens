@@ -1,7 +1,7 @@
 {
   "name": "backlens",
-  "version": "0.5.0",
-  "description": "Run your Node backend through backlens and see every request, every query, and what is wrong with them.",
+  "version": "0.6.0",
+  "description": "See what your Node backend really does on every request, catch what a change broke across every route, and prove fixes by replay. A local recorder, dashboard and MCP server, with a stop hook for coding agents.",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -14,7 +14,8 @@
   "files": [
     "bin",
     "src",
-    "statusline.js"
+    "statusline.js",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=20"
@@ -44,7 +45,12 @@
     "redis",
     "tracing",
     "profiling",
-    "devtools"
+    "devtools",
+    "mcp",
+    "claude-code",
+    "ai-agents",
+    "regression-testing",
+    "replay"
   ],
   "author": "Shayan Dutta"
 }

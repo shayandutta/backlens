@@ -82,7 +82,12 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
   const server = http.createServer(async (req, res) => {
     if (!checks.hostOk(req.headers.host)) return json(res, 403, { error: 'wrong host' });
     if (!checks.originOk(req.headers.origin)) return json(res, 403, { error: 'wrong origin' });
-    const url = new URL(req.url, 'http://localhost');
+    let url;
+    try {
+      url = new URL(req.url, 'http://localhost');
+    } catch {
+      return json(res, 400, { error: 'bad url' });
+    }
     if (req.method === 'GET' && url.pathname === '/') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer' });
       return res.end(readFileSync(UI));
@@ -90,7 +95,14 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
     if (!checks.tokenOk(req.headers['x-backlens-token'])) return json(res, 401, { error: 'Open the link backlens printed in your terminal.' });
     const found = match(req, url.pathname);
     if (!found) return res.writeHead(404).end();
-    return found.route.handle(req, res, url, found.m);
+    try {
+      return await found.route.handle(req, res, url, found.m);
+    } catch (err) {
+      // One failing handler must never take the dashboard (and the app it runs) down.
+      process.stderr.write(`backlens: ${req.method} ${url.pathname} failed: ${(err && err.stack) || err}\n`);
+      if (!res.headersSent) return json(res, 500, { error: `backlens hit an error: ${(err && err.message) || err}` });
+      res.end();
+    }
   });
 
   /** Everything recorded so far, for the command-line test report. */

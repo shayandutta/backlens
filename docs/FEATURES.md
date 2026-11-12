@@ -1,4 +1,4 @@
-# What backlens does today (v0.5.0 + unreleased phases 1–6)
+# What backlens does (v0.6.0)
 
 An inventory of every feature and capability in the code, with where it lives. "Known gaps" are
 problems seen in real use (see WORKLOG.md), not wishes.

@@ -200,3 +200,40 @@ server.listen(0, () => process.send(server.address().port));`;
   assert.equal(span.frames[0].fn, 'listUsers');
   assert.equal(span.frames[0].file, 'wrapped.js');
 });
+
+test('queries an ORM runs on a client the app leased (a transaction) are recorded once', async () => {
+  // A stand-in pg whose pool.query connects for itself, like pg-pool, and an ORM in node_modules
+  // that drives a leased client from microtasks: no app code on the stack when it queries.
+  const pg = `class Client { query(text) { return Promise.resolve({ rows: [], rowCount: 0 }); } release() {} }
+class Pool {
+  connect(cb) { const c = new Client(); if (cb) { cb(null, c, () => c.release()); return; } return Promise.resolve(c); }
+  query(text) { return new Promise((resolve) => this.connect((err, c, done) => c.query(text).then((r) => { done(); resolve(r); }))); }
+}
+module.exports = { Pool, Client };`;
+  // Queries are issued from setImmediate callbacks: the async stack (and any app frame) is lost,
+  // as with drizzle on node-postgres, but the request's context still flows.
+  const orm = `const later = (fn) => new Promise((resolve, reject) => setImmediate(() => fn().then(resolve, reject)));
+module.exports = (pool) => ({
+  transaction: async (fn) => {
+    const c = await later(() => pool.connect());
+    await later(() => c.query('BEGIN'));
+    try { await fn({ run: (t) => later(() => c.query(t)) }); await later(() => c.query('COMMIT')); } finally { c.release(); }
+  },
+});`;
+  const app = `const http = require('node:http');
+const { Pool } = require('pg');
+const pool = new Pool();
+const db = require('orm')(pool);
+const server = http.createServer(async (req, res) => {
+  if (req.url === '/tx') await db.transaction((tx) => tx.run('insert into t values (1)'));
+  else if (req.url === '/own') await pool.query({ text: 'select 9', __backlens: true });
+  else await pool.query('select 1 from t');
+  res.end('ok');
+});
+server.listen(0, () => process.send(server.address().port));`;
+  const traces = await record(['/tx', '/q', '/own'], { 'node_modules/pg/index.js': pg, 'node_modules/orm/index.js': orm, 'tx.js': app }, 'tx.js');
+  const db = (url) => traces.find((t) => t.url === url).spans.filter((s) => s.kind === 'db').map((s) => s.name);
+  assert.deepEqual(db('/tx'), ['BEGIN', 'insert into t values (1)', 'COMMIT']);
+  assert.deepEqual(db('/q'), ['select 1 from t'], 'pool.query is counted once, not again for its own connect');
+  assert.deepEqual(db('/own'), [], "backlens's own tagged queries (the index advisor) are never recorded");
+});
