@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1
+
+- **Fixed: a query recorded twice.** After a transaction, a plain `pool.query` in the same request could be recorded twice, the second copy with no code location. pg-pool reuses the client and replaces its `release()`, so the transaction's lease was never cleared. This showed up as a false "same call twice" issue, seen on a real NestJS/drizzle app.
+- **Fixed: issues fixed outside the dashboard stayed listed.** That covers fixes by an agent or in your editor. Now, when `measure_request` replays a route on the changed code and an issue the dashboard lists is gone, it is treated as a kept fix. It comes back if a later request shows it again.
+
 ## 0.6.0
 
 backlens grows from a query fixer into a check on what every change does to the running app.

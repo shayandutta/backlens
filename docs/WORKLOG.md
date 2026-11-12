@@ -5,6 +5,24 @@ Numbers come from real runs; say so when something was not measured.
 
 ---
 
+## 2026-11-12 (night): 0.6.1, two bugs found by the first real use
+
+An agent ran 0.6.0 on a real app ("find and fix performance issues"):
+- It fixed a real double read: quiz −24%, outside noise; complete 11 → 8 queries, time within noise.
+- It flagged a likely backlens false positive: on fake payment, the same query twice, the second with no code location.
+- The user noticed the dashboard still listed the issues the agent had fixed.
+
+- **Double count.** Reproduced with real drizzle and pg: two transactions, then `db.execute`, recorded `select 4` twice in 0.6.0.
+  - Cause: pg-pool assigns a new `release()` on every acquire. backlens wrapped it only once per client, so a later lease was never cleared, and the client was still marked "leased" when `pool.query` reused it.
+  - Fix: re-wrap on every lease, and never treat `pool.query`'s own client as leased.
+  - Test: `test/register.test.js` "a pooled client reused after a transaction" fails on 0.6.0 and passes now.
+- **Stale issues.** Issues are hidden only by Keep or by a new real request, and replays never count as requests.
+  - Fix: `measure_request` marks a route's listed issue fixed when the replay of the new code no longer shows it (same type and statements). The replay becomes the after-fix request.
+  - Test: `test/stale-issues.test.js` fails without the fix.
+- 92 tests pass.
+
+---
+
 ## 2026-11-12 (release): 0.6.0 hardening (branch `release/0.6.0`)
 
 ### Done
