@@ -163,6 +163,22 @@ OTel spans as an optional input later), other languages, MySQL or Mongo, more AI
 Release gate: the matrix passes in CI; `doctor` reports overhead on a real app; 10 clean `diff`
 runs with no false alarm; the eval pilot run at least once.
 
+## After 0.7: verify the consequences, don't trust the change
+
+Direction (2026-11-13): backlens becomes the layer that understands what the app actually does,
+predicts what a change could affect, experiments safely, and proves the result. Not "first" or
+"only" (Keploy, mutation testers and agent-verification tools exist); the difference is one local
+workflow with replay, code lines and a rolled-back sandbox.
+
+| Release | Build | Done when |
+|---|---|---|
+| 0.8 | BullMQ: request → job → queries; **mutation lab**: mutate one guard (auth check, comparison, validation), run tests + diff, report what nothing caught | a removed role check on a real route is reported as "not caught by tests" |
+| 0.9 | **Concurrency probes**: fire N copies of a recorded write in the sandbox, report double success, negative counts, duplicate jobs; **impact-scoped diff**: changed files → affected routes/tables → diff those first | a non-atomic check-then-decrement is found on a test app; the gate diffs only affected routes |
+| 1.0 | **Counterfactual lab**: agent proposes 2–3 fixes, backlens measures each (queries, time, shape, tests) and keeps the best; **app memory** for agents (routes, tables, past failures, confidence history) | an N+1 gets 3 candidate fixes with measured results |
+| later | behavior discovery with human-confirmed invariants; production behavior profiles (separate product, privacy first); time-travel reconstruction | — |
+
+Before any claim of "agents ship fewer regressions": run the eval (scripts/eval) and publish numbers.
+
 ## Success metrics
 
 - Tokens per task and task success, with and without backlens, measured with the existing `usage`
