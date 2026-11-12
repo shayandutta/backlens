@@ -8,7 +8,7 @@ import { api } from '../src/mcp/session.js';
 
 const TOKEN = 'a'.repeat(32);
 const sleep = (t) => new Promise((r) => setTimeout(r, t));
-// Issues JWT-shaped tokens valid for 6 s; /me needs a live one. Optional-auth /feed answers either way.
+// Issues JWT-shaped tokens valid for 15 s (long enough for a baseline on a busy machine); /me needs a live one. Optional-auth /feed answers either way.
 const APP = `const http = require('node:http');
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const live = (h) => { const m = /^Bearer [^.]+\\.([^.]+)\\./.exec(h || ''); if (!m) return false; try { return JSON.parse(Buffer.from(m[1], 'base64url')).exp * 1000 > Date.now(); } catch { return false; } };
@@ -19,14 +19,14 @@ http.createServer((req, res) => {
     if (req.method === 'POST' && req.url === '/login') {
       const b = JSON.parse(body || '{}');
       if (b.password !== 'pw123456') { res.statusCode = 401; return res.end('{}'); }
-      return res.end(JSON.stringify({ accessToken: 'h.' + b64({ sub: 1, exp: Math.floor(Date.now() / 1000) + 6 }) + '.s' }));
+      return res.end(JSON.stringify({ accessToken: 'h.' + b64({ sub: 1, exp: Math.floor(Date.now() / 1000) + 15 }) + '.s' }));
     }
     if (req.url === '/me') { if (!live(req.headers.authorization)) { res.statusCode = 401; return res.end('{}'); } return res.end('{"id":1,"name":"Ada"}'); }
     res.end(live(req.headers.authorization) ? '{"items":[1],"forYou":true}' : '{"items":[1]}');
   });
 }).listen(0);`;
 
-test('an expired recorded JWT is replaced by a fresh sign-in, not reported as a break', async () => {
+test('an expired recorded JWT is replaced by a fresh sign-in, not reported as a break', { timeout: 60000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'backlens-jwt-'));
   writeFileSync(join(root, 'app.js'), APP);
   writeFileSync(join(root, 'package.json'), '{"name":"jwt-test"}');
@@ -41,12 +41,13 @@ test('an expired recorded JWT is replaced by a fresh sign-in, not reported as a 
       app = await api(session, 'GET', '/api/app?since=999999999');
     }
     const base = `http://127.0.0.1:${app.port}`;
+    const signedAt = Date.now();
     const { accessToken } = await (await fetch(`${base}/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"password":"pw123456"}' })).json();
     for (const p of ['/me', '/feed']) await fetch(base + p, { headers: { authorization: `Bearer ${accessToken}` } });
     await sleep(300);
     const { recent } = await api(session, 'GET', '/api/state');
     await api(session, 'POST', '/api/access/save', { name: 'user', id: recent.find((r) => r.method === 'POST').id });
-    const signedAt = Date.now();
+    
     const first = await api(session, 'POST', '/api/behavior/diff', {});
     assert.ok(first.created);
     assert.deepEqual(first.captured.sort(), ['GET /feed', 'GET /me']);
@@ -54,7 +55,7 @@ test('an expired recorded JWT is replaced by a fresh sign-in, not reported as a 
     assert.equal(saved.find((e) => e.route === 'GET /me').fingerprint.status, 200, 'the baseline was taken while the recorded token was live');
     assert.ok('$.forYou' in saved.find((e) => e.route === 'GET /feed').fingerprint.shape, 'and /feed answered signed in');
 
-    await sleep(Math.max(0, signedAt + 6500 - Date.now())); // the recorded token is now expired
+    await sleep(Math.max(0, signedAt + 15500 - Date.now())); // the recorded token is now expired
     const after = await api(session, 'POST', '/api/behavior/diff', {});
     assert.deepEqual(after.skipped, []);
     assert.deepEqual(after.results, [], 'no 401 on /me, and /feed did not quietly turn anonymous');
