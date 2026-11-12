@@ -1,198 +1,27 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+/** The backlens command. Each subcommand lives in src/cli/; see `backlens --help`. */
 import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { ensureIgnore } from '../config.js';
-import { fileURLToPath } from 'node:url';
-import { format, judge, readBaseline, writeBaseline } from '../report.js';
-import { startServer } from '../server.js';
+import { HELP, parseArgs } from '../src/cli/args.js';
 
-const HELP = `usage:
-  backlens [--port 7777] [--no-open]
-      Open the dashboard. Pick how your app starts once; after that, start, restart,
-      run tests and review issues from the browser.
-
-  backlens [--port 7777] -- <command>
-      Same, but run this exact command as the app.
-
-  backlens mcp [--root <project folder>]
-      For AI editors (Claude Code, Cursor...): an MCP server over stdio that reads the
-      running dashboard for this project: issues, requests, replays, logs and tests.
-
-  backlens statusline --install | --uninstall
-      For Claude Pro and Max: lets backlens see how much of your plan's 5-hour and weekly
-      limits each prompt uses, through Claude Code's status line. Your own status line
-      keeps running as before. --uninstall puts it back exactly.
-
-  backlens test [--baseline file] [--update-baseline] [--strict] [--json file] -- <test command>
-      For CI: run your tests, print the report, exit 1 on new issues.
-`;
-
-const args = process.argv.slice(2);
-const split = args.indexOf('--');
-const own = split === -1 ? args : args.slice(0, split);
-const command = split === -1 ? [] : args.slice(split + 1);
-const testMode = own[0] === 'test';
-if (own.includes('-h') || own.includes('--help') || (testMode && !command.length)) {
+const args = parseArgs(process.argv.slice(2));
+const ci = args.subcommand === 'test';
+if (args.has('-h') || args.has('--help') || (ci && !args.command.length)) {
   process.stderr.write(HELP);
-  process.exit(testMode && !command.length ? 1 : 0);
+  process.exit(ci && !args.command.length ? 1 : 0);
 }
-const flag = (name) => {
-  const i = own.indexOf(name);
-  return i === -1 ? undefined : own[i + 1];
-};
 
-const dim = (s) => `\x1b[2m${s}\x1b[0m`;
-const bold = (s) => `\x1b[1m${s}\x1b[0m`;
-const token = randomBytes(16).toString('hex');
 const root = process.cwd();
+// The session's secret: the dashboard link, the recorder and `backlens mcp` all carry it.
+const token = randomBytes(16).toString('hex');
 
-if (own[0] === 'statusline') await statusline();
-else if (own[0] === 'mcp') await import('../mcp.js').then((m) => m.runMcp({ cwd: root, args: own.slice(1) }));
-else if (testMode) await runTests();
-else await runStudio();
-
-async function statusline() {
-  const m = await import('../statusline.js');
-  if (own.includes('--uninstall')) {
-    const r = m.uninstall();
-    console.log(r.changed ? `backlens: status line restored${r.restored ? ` to ${r.restored}` : ' (none was set before)'}.` : 'backlens: the status line is not backlens; nothing changed.');
-    return;
-  }
-  if (!own.includes('--install')) {
-    // Run as the status line itself.
-    await m.runStatusline();
-    return;
-  }
-  const r = m.install();
-  if (r.already) {
-    console.log(`backlens: already recording plan limits${r.wrap ? `, and running your status line: ${r.wrap}` : ''}.`);
-    return;
-  }
-  console.log(`backlens: Claude Code's status line now goes through backlens, which records only your plan's 5-hour and weekly limit use.`);
-  console.log(r.wrap ? `  your status line still runs, unchanged: ${dim(r.wrap)}` : '  you had no status line, so it stays empty.');
-  console.log(`  changed: ${dim('statusLine')} in ${dim('~/.claude/settings.json')}. Undo: backlens statusline --uninstall`);
-  if (r.inNpxCache) console.log(`  note: this points into npx's cache, which can be cleared. ${bold('npm i -g backlens')} and install again to keep it.`);
-  console.log('  Takes effect on the next status line update in Claude Code.');
-}
-
-async function runStudio() {
-  const chosen = flag('--port');
-  // Without --port, a busy 7777 (another backlens, say) moves on to the next free port.
-  const ports = chosen ? [Number(chosen)] : Array.from({ length: 20 }, (_, i) => 7777 + i);
-  let server;
-  for (const port of ports) {
-    try {
-      server = await startServer({
-        port,
-        root,
-        token,
-        manualArgv: command.length ? command : null,
-        mirror: (line, stream) => process.stderr.write(`${dim('app │')} ${stream === 'sys' ? dim(line) : line}\n`),
-      });
-      break;
-    } catch (err) {
-      if (err.code === 'EADDRINUSE' && port !== ports.at(-1)) continue;
-      process.stderr.write(`backlens: could not open port ${port} (${err.code ?? err.message}). Try --port.\n`);
-      process.exit(1);
-    }
-  }
-  const link = `http://localhost:${server.address().port}/?t=${token}`;
-  process.stderr.write(`${bold('backlens')} dashboard ${bold(link)}\n${dim('         keep this link private: it controls your app. Ctrl+C stops everything.')}\n\n`);
-  if (!own.includes('--no-open')) openBrowser(link);
-  server.startApp();
-
-  // How `backlens mcp` finds this dashboard: the port and token, readable by this user only,
-  // in .backlens/ (which backlens keeps out of git). Removed when backlens stops.
-  const sessionFile = join(root, '.backlens', 'session.json');
-  try {
-    mkdirSync(join(root, '.backlens'), { recursive: true });
-    ensureIgnore(root);
-    writeFileSync(sessionFile, `${JSON.stringify({ port: server.address().port, token, pid: process.pid, root, startedAt: Date.now() })}\n`, { mode: 0o600 });
-    chmodSync(sessionFile, 0o600);
-  } catch {}
-  process.on('exit', () => {
-    try {
-      rmSync(sessionFile, { force: true });
-    } catch {}
-  });
-
-  let stopping = false;
-  const stop = async () => {
-    if (stopping) process.exit(1);
-    stopping = true;
-    process.stderr.write(dim('\nbacklens: stopping\n'));
-    await server.shutdown();
-    process.exit(0);
-  };
-  process.on('SIGINT', stop);
-  process.on('SIGTERM', stop);
-}
-
-function openBrowser(link) {
-  const [cmd, argv] =
-    process.platform === 'darwin' ? ['open', [link]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', link]] : ['xdg-open', [link]];
-  try {
-    spawn(cmd, argv, { stdio: 'ignore', detached: true }).on('error', () => {}).unref();
-  } catch {}
-}
-
-async function runTests() {
-  const baselineFile = resolve(flag('--baseline') ?? 'backlens.baseline.json');
-  let baseline = new Set();
-  if (!own.includes('--update-baseline')) {
-    try {
-      baseline = readBaseline(baselineFile);
-    } catch (err) {
-      process.stderr.write(`backlens: ${err.message}\n`);
-      process.exit(1);
-    }
-  }
-  // Any free port, so CI jobs can run side by side.
-  const server = await startServer({ port: 0, root, token });
-  const actualPort = server.address().port;
-  const register = fileURLToPath(new URL('../register.cjs', import.meta.url));
-  process.stderr.write(`${bold('backlens')} recording ${dim(command.join(' '))}\n\n`);
-  const child = spawn(command[0], command.slice(1), {
-    stdio: 'inherit',
-    shell: process.platform === 'win32',
-    env: {
-      ...process.env,
-      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --enable-source-maps --require ${JSON.stringify(register)}`.trim(),
-      BACKLENS_URL: `http://127.0.0.1:${actualPort}`,
-      BACKLENS_TOKEN: token,
-      BACKLENS_ROOT: root,
-    },
-  });
-  child.on('error', (err) => {
-    process.stderr.write(`backlens: could not start ${command[0]}: ${err.message}\n`);
-    process.exit(1);
-  });
-  process.on('SIGINT', () => {});
-  process.on('SIGTERM', () => child.kill('SIGTERM'));
-  child.on('exit', (code, signal) => {
-    const childCode = code ?? (signal ? 1 : 0);
-    // Traces are sent as each response finishes; give the last ones a moment to land.
-    setTimeout(() => {
-      const { traces, known, advice } = server.recorded();
-      server.close();
-      const result = judge(traces, known, baseline, { strict: own.includes('--strict'), advice });
-      process.stderr.write(`${format(result, traces)}\n`);
-      const jsonFile = flag('--json');
-      if (jsonFile) writeFileSync(resolve(jsonFile), `${JSON.stringify({ routes: result.routes, issues: result.issues, requests: traces.length }, null, 2)}\n`);
-      if (own.includes('--update-baseline')) {
-        writeBaseline(baselineFile, result.issues);
-        process.stderr.write(`\nbacklens: wrote ${result.issues.length} known issue${result.issues.length === 1 ? '' : 's'} to ${baselineFile}\n`);
-        process.exit(childCode);
-      }
-      if (childCode !== 0) process.exit(childCode);
-      if (result.failing.length) {
-        process.stderr.write(`\nbacklens: ${result.failing.length} new issue${result.failing.length === 1 ? '' : 's'}. Fix ${result.failing.length === 1 ? 'it' : 'them'}, or accept with --update-baseline.\n`);
-        process.exit(1);
-      }
-      process.stderr.write(`\nbacklens: no new issues.\n`);
-      process.exit(0);
-    }, 500);
-  });
-}
+if (args.subcommand === 'statusline') await import('../src/cli/statusline.js').then((m) => m.runStatuslineCommand({ args }));
+else if (args.subcommand === 'mcp') await import('../src/mcp/server.js').then((m) => m.runMcp({ cwd: root, args: args.own.slice(1) }));
+else if (args.subcommand === 'diff' || args.subcommand === 'accept') await import('../src/cli/diff.js').then((m) => m.runDiff({ args, root }));
+else if (args.subcommand === 'init') await import('../src/harness/init.js').then((m) => m.runInit({ args, root }));
+else if (args.subcommand === 'hook' && args.own[1] === 'stop') await import('../src/harness/stop-hook.js').then((m) => m.runStopHookCommand({ harness: ['codex', 'cursor'].includes(args.flag('--harness')) ? args.flag('--harness') : 'claude' }));
+else if (args.subcommand === 'hook') {
+  process.stderr.write('usage: backlens hook stop\n');
+  process.exit(1);
+} else if (args.subcommand === 'report') await import('../src/evidence/report.js').then((m) => m.runReport({ args, root }));
+else if (ci) await import('../src/cli/ci.js').then((m) => m.runCi({ args, root, token }));
+else await import('../src/cli/studio.js').then((m) => m.runStudio({ args, root, token }));

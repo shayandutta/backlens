@@ -1,37 +1,42 @@
 {
   "name": "backlens",
-  "version": "0.5.0",
-  "description": "Run your Node backend through backlens and see every request, every query, and what is wrong with them.",
+  "version": "0.6.0",
+  "description": "See what your Node backend really does on every request, catch what a change broke across every route, and prove fixes by replay. A local recorder, dashboard and MCP server, with a stop hook for coding agents.",
   "license": "MIT",
   "type": "module",
   "bin": {
     "backlens": "bin/backlens.js"
   },
   "exports": {
-    "./register": "./register.cjs"
+    "./register": "./src/recorder/index.cjs",
+    "./package.json": "./package.json"
   },
   "files": [
     "bin",
-    "ai",
-    "register.cjs",
-    "server.js",
-    "analyze.js",
-    "report.js",
-    "config.js",
-    "runner.js",
-    "ui.html",
-    "mcp.js",
-    "agent-usage.js",
-    "statusline.js"
+    "src",
+    "statusline.js",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/*.test.js",
+    "check": "node scripts/check-syntax.mjs",
+    "prepublishOnly": "npm run check && npm test"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^1.6.0",
+    "@anthropic-ai/sdk": "^1.6.0"
+  },
+  "peerDependencies": {
+    "typescript": ">=4.7"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
     "typescript": "^5.9.3"
   },
   "repository": {
@@ -51,7 +56,12 @@
     "redis",
     "tracing",
     "profiling",
-    "devtools"
+    "devtools",
+    "mcp",
+    "claude-code",
+    "ai-agents",
+    "regression-testing",
+    "replay"
   ],
   "author": "Shayan Dutta"
 }

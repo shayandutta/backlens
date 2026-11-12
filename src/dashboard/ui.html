@@ -1,0 +1,1276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>backlens</title>
+<style>
+  :root {
+    --bg: #0a0b0f; --panel: #101218; --raise: #151821; --line: #1e2230; --line-2: #2a2f40;
+    --text: #e7e9f0; --sub: #7d8399; --faint: #464c60;
+    --accent: #8ab4ff; --db: #8ab4ff; --redis: #f0a07a; --http: #b9a3f5; --step: #4a5068;
+    --warn: #f5b84a; --warn-bg: #2a2212; --hint: #8ab4ff; --hint-bg: #141c2c; --err: #f26d6d; --ok: #3ecf8e;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  .mono { font-family: var(--mono); }
+  header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 20px; height: 52px; padding: 0 20px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 700; letter-spacing: -0.01em; }
+  .live { display: inline-flex; align-items: center; gap: 8px; color: var(--sub); font: 12px var(--mono); }
+  .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px #3ecf8e22; }
+  .live.idle i { background: var(--faint); box-shadow: none; }
+  nav { display: flex; gap: 4px; margin-left: 12px; }
+  nav button { padding: 6px 12px; border-radius: 6px; color: var(--sub); font-size: 13px; font-weight: 500; }
+  nav button[aria-selected="true"] { color: var(--text); background: var(--raise); }
+  nav .count { margin-left: 6px; font: 11px var(--mono); padding: 1px 6px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); }
+  .spacer { flex: 1; }
+  .ghost { font-size: 12px; color: var(--sub); padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; }
+  .ghost:hover { color: var(--text); border-color: var(--line-2); }
+  main { display: grid; grid-template-columns: minmax(0, 1fr); min-height: calc(100vh - 52px); }
+  main.split { grid-template-columns: minmax(0, 1fr) minmax(0, 560px); }
+  .view { padding: 20px; min-width: 0; }
+  h2 { font-size: 13px; font-weight: 600; color: var(--sub); margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font: 500 11px var(--mono); color: var(--faint); padding: 0 12px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th.n, td.n { text-align: right; }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--line); font: 13px var(--mono); white-space: nowrap; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover td { background: var(--panel); }
+  tbody tr.sel td { background: var(--raise); }
+  tbody tr.idle td { opacity: 0.4; }
+  tbody tr.idle { cursor: default; }
+  .method { display: inline-block; min-width: 64px; font-weight: 600; color: var(--sub); }
+  .route { color: var(--text); overflow: hidden; text-overflow: ellipsis; max-width: 46ch; display: inline-block; vertical-align: bottom; }
+  .muted { color: var(--sub); }
+  .badge { font: 11px var(--mono); padding: 2px 7px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); }
+  .s2 { color: var(--ok); } .s4 { color: var(--warn); } .s5 { color: var(--err); }
+  .empty { margin: 80px auto; max-width: 460px; text-align: center; color: var(--sub); }
+  .empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 6px; }
+  .empty code { font-family: var(--mono); color: var(--text); background: var(--raise); padding: 2px 6px; border-radius: 4px; }
+  .issue { display: grid; grid-template-columns: 3px 1fr; gap: 0 16px; padding: 16px 16px 16px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); margin-bottom: 10px; }
+  .issue .bar { border-radius: 8px 0 0 8px; margin: -16px 0 -16px 0; }
+  .issue.warn .bar { background: var(--warn); } .issue.hint .bar { background: var(--hint); }
+  .link-site { color: var(--text); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; font: inherit; cursor: pointer; }
+  .link-site:hover { color: var(--accent); text-decoration-color: var(--accent); }
+  .link-site.muted { color: var(--sub); }
+  .editor-pick { font: 12px var(--sans); color: var(--sub); display: inline-flex; align-items: center; gap: 6px; }
+  .editor-pick select { font: 12px var(--sans); color: var(--text); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 6px; }
+  .map-intro { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px; margin-bottom: 18px; }
+  .map-intro h2 { margin: 0; }
+  .map-legend { display: flex; gap: 16px; font: 11px var(--mono); color: var(--sub); }
+  .map-legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--line-2); vertical-align: middle; margin-right: 6px; }
+  .map-legend i.thick { border-top-width: 4px; } .map-legend i.bad { border-color: var(--err); }
+  .map-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+  .map { position: relative; display: grid; grid-template-columns: minmax(240px, 380px) minmax(120px, 1fr) minmax(240px, 360px); }
+  .map svg.wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  .map svg path { fill: none; transition: stroke 120ms, opacity 120ms; }
+  .zone { position: relative; border: 1px solid var(--line); border-radius: 10px; padding: 26px 10px 10px; margin-bottom: 18px; background: rgba(255,255,255,0.012); }
+  .zone-label { position: absolute; top: -9px; left: 12px; padding: 0 6px; background: var(--bg); font: 11px var(--mono); color: var(--sub); display: flex; gap: 8px; align-items: center; }
+  .zone-label b { color: var(--text); font-weight: 600; }
+  .zone-label i { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
+  .mrow { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px; border-radius: 6px; text-align: left; font: 12px var(--mono); border: 1px solid transparent; transition: opacity 120ms, background 120ms, border-color 120ms; }
+  .mrow:hover { background: var(--raise); }
+  .mrow .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  .mrow .lbl em { font-style: normal; color: var(--sub); display: inline-block; min-width: 52px; }
+  .mrow .num { color: var(--sub); font-size: 11px; white-space: nowrap; }
+  .mrow .num .w { color: var(--redis); }
+  .mrow.flag .lbl { color: #f6b0b0; }
+  .mrow.sel { background: var(--raise); border-color: var(--accent); }
+  .mrow.on { background: #ffffff08; }
+  .map.focus .mrow:not(.on):not(.sel) { opacity: 0.3; }
+  .map-side { position: sticky; top: 112px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 16px; font-size: 13px; }
+  .map-side h3 { margin: 0 0 2px; font: 600 13px var(--mono); word-break: break-all; }
+  .map-side .sub { color: var(--sub); font-size: 12px; margin-bottom: 12px; }
+  .map-side table { table-layout: fixed; }
+  .map-side table td { padding: 6px 4px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .map-side table td:first-child { width: 58%; }
+  .map-side .tip { color: var(--sub); font-size: 12px; line-height: 1.6; }
+  @media (max-width: 1100px) { .map-wrap { grid-template-columns: 1fr; } .map-side { position: static; } }
+  @media (max-width: 760px) { .map { grid-template-columns: 1fr; } .map svg.wires { display: none; } .map .gap { display: none; } }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 100vw); z-index: 8; background: var(--panel); border-left: 1px solid var(--line-2); box-shadow: -16px 0 40px rgba(0,0,0,0.45); overflow-y: auto; padding: 18px 20px 40px; }
+  .drawer h2 { color: var(--text); font-size: 15px; margin: 0 0 4px; padding-right: 70px; }
+  .fix-head { position: relative; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+  .kicker2 { font: 11px var(--mono); color: var(--accent); margin-bottom: 4px; }
+  .chip.live { color: var(--accent); }
+  .plan h4 { margin: 18px 0 6px; }
+  .feed { list-style: none; margin: 16px 0 0; padding: 0; position: relative; }
+  .feed::before { content: ''; position: absolute; left: 7px; top: 8px; bottom: 8px; width: 1px; background: var(--line); }
+  .feed.ghosted { opacity: 0.7; margin-top: 4px; }
+  .fi { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 12px; padding: 7px 0; font-size: 13px; }
+  .dot { position: relative; z-index: 1; display: grid; place-items: center; width: 16px; height: 18px; background: var(--panel); font-size: 11px; line-height: 1; }
+  .dot.ok { color: var(--ok); } .dot.bad { color: var(--err); } .dot.warnd { color: var(--warn); } .dot.skip { color: var(--faint); } .dot.run { color: var(--accent); }
+  .fh { font: 12.5px/1.6 var(--mono); color: #c8cde0; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+  .fh b { color: var(--text); font-weight: 600; }
+  .fh code { font: 11.5px var(--mono); color: var(--sub); }
+  .ft { margin-left: auto; font: 10.5px var(--mono); color: var(--faint); }
+  .sub2 { font: 11.5px/1.55 var(--mono); color: var(--sub); white-space: pre-wrap; margin-top: 2px; }
+  .fi.repair .fh { color: var(--accent); }
+  .bubble { font-size: 13.5px; line-height: 1.6; color: var(--text); background: var(--raise); border: 1px solid var(--line); border-radius: 10px; border-top-left-radius: 3px; padding: 10px 12px; }
+  .note { font-size: 12px; color: var(--sub); margin-top: 6px; line-height: 1.55; }
+  .editor { margin-top: 8px; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; background: #0b0d12; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+  .editor-head { display: flex; align-items: center; gap: 10px; padding: 7px 10px; background: #12151d; border-bottom: 1px solid var(--line); font: 11.5px var(--mono); color: var(--sub); }
+  .editor-head .muted { margin-left: auto; }
+  .dots { display: inline-flex; gap: 5px; } .dots i { width: 8px; height: 8px; border-radius: 50%; background: #2a2f40; }
+  .editor-body { padding: 6px 0; overflow-x: auto; font: 12px/1.65 var(--mono); }
+  .cl { display: grid; grid-template-columns: 44px 18px max-content; min-width: 100%; }
+  .cl .ln { color: #3f465c; text-align: right; padding-right: 8px; user-select: none; }
+  .cl .mk { color: #3f465c; user-select: none; }
+  .cl .cx { white-space: pre; padding-right: 14px; color: #c9cfdf; }
+  .cl.del { background: rgba(242,109,109,0.11); } .cl.del .mk, .cl.del .ln { color: #e08080; } .cl.del .cx { color: #e7b0b0; }
+  .cl.add { background: rgba(62,207,142,0.11); } .cl.add .mk, .cl.add .ln { color: #5fd39c; }
+  .cl.ctx .cx { color: #7f879c; }
+  .tk { color: #c3a6ff; } .ts { color: #9fd7a3; } .tc { color: #5c6478; font-style: italic; } .tn { color: #f0b48a; }
+  .term { margin: 6px 0 0; max-height: 220px; overflow: auto; background: #07080b; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font: 11.5px/1.55 var(--mono); color: #aeb5c8; white-space: pre-wrap; word-break: break-word; }
+  .fix-actions { position: sticky; bottom: -40px; margin: 18px -20px -40px; padding: 14px 20px 18px; background: linear-gradient(transparent, var(--panel) 30%); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .verdict { margin: 0; }
+
+  .drawer .close { position: absolute; top: 14px; right: 16px; }
+  .drawer section { margin-top: 18px; }
+  .drawer h4 { margin: 0 0 8px; font-size: 12px; color: var(--sub); font-weight: 600; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font: 11px var(--mono); padding: 2px 8px; border-radius: 10px; background: var(--raise); color: #c8cde0; }
+  .reasons { margin: 6px 0 0; padding-left: 18px; color: var(--sub); font-size: 12px; }
+  .sendlist { font: 12px var(--mono); color: #c8cde0; margin: 0; padding-left: 18px; }
+  .diff { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-bottom: 10px; }
+  .diff-head { font: 12px var(--mono); padding: 6px 10px; background: var(--raise); color: var(--sub); }
+  .diff pre { margin: 0; padding: 8px 0; font: 12px/1.5 var(--mono); overflow-x: auto; background: var(--bg); }
+  .diff pre span { display: block; padding: 0 10px; white-space: pre; }
+  .diff .add { background: #12301f; color: #8de0b0; } .diff .del { background: #3a1a1c; color: #f3a6a6; } .diff .ctx { color: #7d8399; }
+  .steps { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+  .steps li { display: grid; grid-template-columns: 20px 1fr; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .steps li small { display: block; color: var(--sub); font: 11px/1.5 var(--mono); white-space: pre-wrap; }
+  .verdict { padding: 12px 14px; border-radius: 8px; font-size: 13px; margin-top: 14px; }
+  .verdict.good { background: #12301f; color: #a8ebc4; } .verdict.bad { background: #3a1a1c; color: #f6b8b8; } .verdict.meh { background: var(--warn-bg); color: #f7d08a; }
+  .ai-box { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg); font-size: 13px; line-height: 1.6; }
+  .ai-box p { margin: 0 0 6px; } .ai-box .by { font: 11px var(--mono); color: var(--faint); margin-top: 6px; }
+  .conf { font: 11px var(--mono); padding: 1px 7px; border-radius: 10px; margin-left: 8px; }
+  .conf.high { background: #12301f; color: #8de0b0; } .conf.medium { background: var(--warn-bg); color: var(--warn); } .conf.low { background: #3a1a1c; color: #f3a6a6; }
+  .opt-card { display: block; border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; cursor: pointer; }
+  .opt-card:has(input:checked) { border-color: var(--accent); background: #ffffff05; }
+  .opt-card { cursor: default; } .opt-card > label { cursor: pointer; }
+  .opt-card a { color: var(--accent); }
+  a.btn { text-decoration: none; display: inline-block; }
+  .compare-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 4px 0 14px; }
+  .compare-card h4 { margin: 0 0 8px; font-size: 13px; }
+  .compare-card table { width: auto; max-width: 100%; border-collapse: collapse; font: 13px var(--mono); margin-bottom: 10px; }
+  .compare-card td, .compare-card th { white-space: nowrap; }
+  .compare-card th { text-align: left; font-weight: 400; color: var(--sub); padding: 3px 18px 3px 0; }
+  .compare-card td { padding: 3px 10px 3px 0; }
+  .compare-card .arrow { color: var(--sub); }
+  .compare-card .better { color: #4ade80; } .compare-card .worse { color: #f87171; } .compare-card .same { color: var(--text); }
+  .compare-card .delta { font-size: 12px; }
+  .field input[type=password] { flex: 1; font: 13px var(--mono); color: var(--text); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 8px; }
+  .progress { height: 6px; border-radius: 3px; background: var(--raise); overflow: hidden; margin: 10px 0 0; }
+  .progress > div { height: 100%; background: var(--accent); transition: width .4s; }
+  .opt-card b { font-size: 13px; } .opt-card small { display: block; color: var(--sub); font-size: 12px; margin-top: 4px; }
+  .field { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; color: var(--sub); }
+  .field input[type=number], .field select { font: 13px var(--mono); color: var(--text); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 5px 8px; }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line-2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+  .issue h3 { margin: 0; font-size: 14px; font-weight: 600; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 6px; font: 12px var(--mono); color: var(--sub); }
+  .meta .site { color: var(--text); }
+  .issue pre, .detail pre { margin: 12px 0 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.6 var(--mono); color: #c8cde0; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; }
+  .fix { margin-top: 10px; font-size: 13px; color: var(--sub); }
+  .fix b { color: var(--text); font-weight: 500; }
+  .link { font: 12px var(--mono); color: var(--accent); margin-top: 10px; }
+  .detail { border-left: 1px solid var(--line); background: var(--panel); min-width: 0; position: sticky; top: 52px; height: calc(100vh - 52px); overflow: auto; }
+  .detail-head { display: flex; align-items: flex-start; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 2; }
+  .detail-head .title { font: 600 14px var(--mono); word-break: break-all; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
+  .stats div { padding: 10px 20px; border-right: 1px solid var(--line); }
+  .stats div:last-child { border-right: 0; }
+  .stats dt { font: 11px var(--mono); color: var(--faint); }
+  .stats dd { margin: 2px 0 0; font: 600 15px var(--mono); }
+  .pinned { padding: 12px 20px 0; }
+  .pin { padding: 10px 12px; border-radius: 6px; margin-bottom: 8px; font-size: 13px; }
+  .pin.warn { background: var(--warn-bg); color: #f7d08a; } .pin.hint { background: var(--hint-bg); color: #b9cdf5; }
+  .pin span { display: block; font: 11px var(--mono); opacity: 0.8; margin-top: 2px; }
+  .wf { padding: 12px 20px 24px; }
+  .axis { display: flex; justify-content: space-between; font: 10px var(--mono); color: var(--faint); margin: 0 0 4px 0; padding-left: 40%; }
+  .row { display: grid; grid-template-columns: 40% 1fr 54px; align-items: center; gap: 10px; width: 100%; padding: 5px 0; text-align: left; border-bottom: 1px solid #ffffff06; }
+  .row:hover { background: #ffffff05; }
+  .row .name { display: flex; gap: 8px; align-items: center; min-width: 0; font: 12px var(--mono); }
+  .row .name em { font-style: normal; font-size: 10px; padding: 0 5px; border-radius: 3px; border: 1px solid var(--line-2); color: var(--sub); flex-shrink: 0; }
+  .row .name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c8cde0; }
+  .row.flag .name span { color: var(--warn); }
+  .track { position: relative; height: 10px; }
+  .track b { position: absolute; top: 0; height: 100%; border-radius: 2px; min-width: 2px; }
+  .row .ms { text-align: right; font: 12px var(--mono); color: var(--sub); }
+  .open { padding: 4px 0 12px; font-size: 12px; }
+  .open .where { font: 12px var(--mono); color: var(--sub); margin-top: 8px; }
+  .open .where div { color: #c8cde0; }
+  .legend { display: flex; gap: 14px; font: 11px var(--mono); color: var(--sub); margin-bottom: 10px; }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .snapbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 18px; }
+  .snapbar input { font: 13px var(--mono); color: var(--text); background: var(--panel); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 10px; width: 180px; }
+  .snapbar input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .snapbar select { font: 13px var(--mono); color: var(--text); background: var(--panel); border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 8px; }
+  .primary { font-size: 12px; font-weight: 600; color: var(--bg); background: var(--accent); padding: 7px 12px; border-radius: 6px; }
+  .better { color: var(--ok); } .worse { color: var(--err); }
+  .arrow { color: var(--faint); padding: 0 4px; }
+  .note { font-size: 12px; color: var(--sub); margin: -8px 0 16px; }
+  .appbar { position: sticky; top: 52px; z-index: 4; display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 20px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 13px; }
+  .app-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex-shrink: 0; }
+  .app-dot.running { background: var(--ok); box-shadow: 0 0 0 3px #3ecf8e22; }
+  .app-dot.crashed { background: var(--err); box-shadow: 0 0 0 3px #f26d6d22; }
+  .app-name { font-weight: 600; }
+  .app-meta { font: 12px var(--mono); color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .app-meta b { color: var(--err); font-weight: 500; }
+  .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--sub); margin-right: 6px; cursor: pointer; }
+  .toggle input { accent-color: var(--accent); }
+  .detail { top: 96px; height: calc(100vh - 96px); }
+  .logs { position: fixed; left: 0; right: 0; bottom: 0; height: 38vh; z-index: 6; background: var(--bg); border-top: 1px solid var(--line-2); display: flex; flex-direction: column; box-shadow: 0 -12px 32px rgba(0,0,0,0.4); }
+  .logs-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 20px; font: 12px var(--mono); color: var(--sub); border-bottom: 1px solid var(--line); }
+  .logs pre, .out { margin: 0; padding: 10px 20px; overflow: auto; flex: 1; font: 12px/1.55 var(--mono); color: #c8cde0; white-space: pre-wrap; word-break: break-word; }
+  .logs .err, .out .err { color: #f3a6a6; } .logs .sys, .out .sys { color: var(--accent); }
+  body.has-logs main { padding-bottom: 38vh; }
+  .setup { max-width: 640px; margin: 48px auto; }
+  .setup h1 { font-size: 20px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .setup p { color: var(--sub); margin: 0 0 24px; }
+  .setup fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px 10px; margin: 0 0 16px; }
+  .setup legend { padding: 0 6px; font-size: 13px; font-weight: 600; }
+  .setup label.opt { display: grid; grid-template-columns: 18px 110px 1fr; gap: 8px; align-items: baseline; padding: 6px 0; cursor: pointer; font-size: 13px; }
+  .setup label.opt input { accent-color: var(--accent); }
+  .setup label.opt code { font: 12px var(--mono); color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .setup .hintline { font-size: 12px; color: var(--sub); margin: 6px 0 4px; }
+  .setup .row-actions { display: flex; align-items: center; gap: 12px; }
+  .error { color: var(--err); font-size: 13px; }
+  .tests-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .tests-head .what { font: 12px var(--mono); color: var(--sub); }
+  .summary { font: 13px var(--mono); padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); margin-bottom: 14px; }
+  .summary .bad { color: var(--err); } .summary .good { color: var(--ok); }
+  details.output { margin-bottom: 16px; border: 1px solid var(--line); border-radius: 8px; }
+  details.output summary { cursor: pointer; padding: 8px 14px; font: 12px var(--mono); color: var(--sub); }
+  details.output .out { max-height: 320px; border-top: 1px solid var(--line); }
+  .tag { font: 11px var(--mono); padding: 1px 7px; border-radius: 10px; margin-right: 8px; }
+  .tag.new { background: #3a1f22; color: #f6a3a3; } .tag.known { background: var(--raise); color: var(--sub); }
+  .actions { display: flex; gap: 10px; margin-top: 12px; }
+  .gate { max-width: 460px; margin: 120px auto; text-align: center; color: var(--sub); }
+  .gate b { display: block; color: var(--text); font-size: 16px; margin-bottom: 8px; }
+  @media (max-width: 1000px) { main.split { grid-template-columns: 1fr; } .detail { position: static; height: auto; border-left: 0; border-top: 1px solid var(--line); } nav { margin-left: 0; } header { gap: 12px; } .hide-sm { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">backlens</span>
+  <nav role="tablist" aria-label="Views">
+    <button role="tab" data-tab="map" aria-selected="true">Map</button>
+    <button role="tab" data-tab="routes" aria-selected="false">Routes</button>
+    <button role="tab" data-tab="issues" aria-selected="false">Issues<span class="count" id="issue-count" hidden></span></button>
+    <button role="tab" data-tab="requests" aria-selected="false">Requests</button>
+    <button role="tab" data-tab="tests" aria-selected="false">Tests<span class="count" id="test-count" hidden></span></button>
+    <button role="tab" data-tab="compare" aria-selected="false">Compare</button>
+    <button role="tab" data-tab="agents" aria-selected="false">Agents</button>
+  </nav>
+  <span class="spacer"></span>
+  <span class="live idle" id="live"><i></i><span id="live-text">waiting for requests</span></span>
+  <button class="ghost" id="clear" type="button" title="Forget the requests recorded so far">Clear</button>
+</header>
+<div class="appbar" id="appbar" hidden>
+  <span class="app-dot" id="app-dot"></span>
+  <span class="app-name" id="app-name"></span>
+  <span class="app-meta" id="app-meta"></span>
+  <span class="spacer"></span>
+  <label class="editor-pick">open files in <select id="editor-pick" aria-label="Editor for file links"></select></label>
+  <label class="toggle" id="auto-wrap" hidden><input type="checkbox" id="auto" /> restart on file change</label>
+  <button class="ghost" type="button" id="app-restart">Restart</button>
+  <button class="ghost" type="button" id="app-toggle">Stop</button>
+  <button class="ghost" type="button" id="logs-toggle" aria-expanded="false" aria-controls="logs">Logs</button>
+  <button class="ghost" type="button" id="ai-open">AI</button>
+  <button class="ghost" type="button" id="setup-open">Setup</button>
+</div>
+<main id="main">
+  <section class="view" id="view" aria-live="polite"></section>
+  <aside class="detail" id="detail" hidden></aside>
+</main>
+<aside class="drawer" id="fix" hidden aria-label="Suggested fix"></aside>
+<aside class="drawer" id="aiset" hidden aria-label="AI settings"></aside>
+<section class="logs" id="logs" hidden aria-label="App logs"><div class="logs-head"><span>app logs</span><button class="ghost" type="button" id="logs-close">Close</button></div><pre id="logs-body"></pre></section>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const ms = (n) => (n < 10 ? n.toFixed(1) : Math.round(n)) + ' ms';
+const KIND = { db: ['db', 'var(--db)'], redis: ['redis', 'var(--redis)'], http: ['http', 'var(--http)'] };
+
+// The link backlens prints carries a session token; keep it for this tab and drop it from the address bar.
+const TOKEN = (() => {
+  const fromUrl = new URLSearchParams(location.search).get('t');
+  try {
+    if (fromUrl) sessionStorage.setItem('backlens-token', fromUrl);
+    return fromUrl || sessionStorage.getItem('backlens-token') || '';
+  } catch { return fromUrl || ''; }
+})();
+if (location.search) history.replaceState(null, '', location.pathname);
+function api(path, opts = {}) {
+  return fetch(path, { ...opts, headers: { ...(opts.headers || {}), 'x-backlens-token': TOKEN, ...(opts.body ? { 'content-type': 'application/json' } : {}) } });
+}
+
+let state = { routes: [], issues: [], recent: [], total: 0 };
+let appInfo = null;
+let appSeq = 0;
+let logsOpen = false;
+let cfg = null;
+let showSetup = false;
+let setupError = '';
+let testInfo = null;
+let testSeq = 0;
+let testLines = [];
+let testError = '';
+let tab = 'map';
+let routeFilter = null;
+let openTrace = null;
+let lastTotal = -1;
+
+function split(route) { const i = route.indexOf(' '); return [route.slice(0, i), route.slice(i + 1)]; }
+function statusClass(s) { return s >= 500 ? 's5' : s >= 400 ? 's4' : 's2'; }
+function ago(t) { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? s + 's ago' : Math.round(s / 60) + 'm ago'; }
+
+function empty() {
+  return `<div class="empty"><b>No requests yet</b>Use your app: open it in the browser, call an endpoint, or run your tests. Every request your Node server handles shows up here.</div>`;
+}
+
+function renderRoutes() {
+  if (!state.routes.length) return empty();
+  const called = state.routes.filter((r) => r.calls).length;
+  const dash = '<span class="muted">—</span>';
+  return `<h2>${called} of ${state.routes.length} routes called</h2><table>
+    <thead><tr><th>route</th><th class="n">calls</th><th class="n">p50</th><th class="n hide-sm">p95</th><th class="n">queries / req</th><th class="n hide-sm">redis / req</th><th class="n hide-sm">http / req</th><th class="n">issues</th></tr></thead>
+    <tbody>${state.routes.map((r) => { const [m, p] = split(r.route); const idle = !r.calls; return `<tr data-route="${esc(r.route)}" class="${idle ? 'idle' : ''}">
+      <td><span class="method">${esc(m)}</span><span class="route">${esc(p)}</span></td>
+      <td class="n">${idle ? dash : r.calls}</td><td class="n">${idle ? dash : ms(r.p50)}</td><td class="n hide-sm muted">${idle ? dash : ms(r.p95)}</td>
+      <td class="n">${idle ? dash : r.queries}</td><td class="n hide-sm muted">${idle ? dash : r.redis}</td><td class="n hide-sm muted">${idle ? dash : r.http}</td>
+      <td class="n">${r.issues ? `<span class="badge">${r.issues}</span>` : '<span class="muted">·</span>'}</td></tr>`; }).join('')}</tbody></table>`;
+}
+
+function renderIssues() {
+  if (!state.total) return empty();
+  if (!state.issues.length) return `<div class="empty"><b>No issues found</b>backlens checks every request for repeated queries, N+1 loops and calls that wait for each other. Nothing so far.</div>`;
+  return `<h2>${state.issues.length} issue${state.issues.length === 1 ? '' : 's'}, worst first</h2>` + state.issues.map((i, idx) => `
+    <article class="issue ${i.severity}">
+      <div class="bar"></div>
+      <div>
+        <h3>${esc(i.title)}</h3>
+        <div class="meta"><span>${esc(i.route)}</span><span>seen in ${i.seen} of ${i.of} request${i.of === 1 ? '' : 's'}</span>${i.cost ? `<span>${i.type === 'serial' ? `up to ~${ms(i.cost)} saved if run together (estimate)` : `~${ms(i.cost)} repeated work each time`}</span>` : ''}</div>
+        <div class="meta">${i.sites.map(siteLink).join('<span>→</span>')}</div>
+        <pre>${esc(i.sql)}</pre>
+        <div class="fix"><b>Fix:</b> ${esc(i.fix)}</div>
+        <div class="actions"><button class="ghost" type="button" data-ai-explain="issues:${idx}">Explain</button><button class="primary" type="button" data-ai-fix="issues:${idx}">Suggest fix</button>${i.type === 'index' && /CREATE INDEX[^;]*;/.test(i.fix) ? `<button class="ghost" type="button" data-copy="${esc(i.fix.match(/CREATE INDEX[^;]*;/)[0])}">Copy SQL</button>` : ''}<button class="link" type="button" data-trace="${esc(i.example)}" style="margin-top:0">Open a request with this issue →</button></div>
+        ${explainBox(i.key)}
+      </div>
+    </article>`).join('');
+}
+
+function renderRequests() {
+  const list = routeFilter ? state.recent.filter((t) => t.route === routeFilter) : state.recent;
+  if (!state.total) return empty();
+  return `<h2>${routeFilter ? `<button class="ghost" type="button" id="unfilter">${esc(routeFilter)} ✕</button>` : `latest ${list.length} requests`}</h2><table>
+    <thead><tr><th>when</th><th>request</th><th class="n">status</th><th class="n">time</th><th class="n hide-sm">calls</th></tr></thead>
+    <tbody>${list.map((t) => `<tr data-trace="${esc(t.id)}" class="${openTrace && openTrace.trace.id === t.id ? 'sel' : ''}">
+      <td class="muted">${ago(t.at)}</td><td><span class="method">${esc(t.method)}</span><span class="route">${esc(t.url)}</span>${t.afterFix ? ' <span class="chip live">after fix</span>' : ''}</td>
+      <td class="n ${statusClass(t.status)}">${t.aborted ? 'cancelled' : t.status}</td><td class="n">${ms(t.duration)}</td><td class="n hide-sm muted">${t.spans}</td></tr>`).join('')}</tbody></table>`;
+}
+
+let snapshots = [];
+let compareTo = null;
+async function loadSnapshots() {
+  try {
+    const res = await api('/api/snapshots');
+    snapshots = (await res.json()).snapshots;
+    if (!snapshots.some((x) => x.name === compareTo)) compareTo = snapshots[0] ? snapshots[0].name : null;
+  } catch { snapshots = []; }
+}
+
+function delta(before, now, unit, digits = 1, noisy = false) {
+  if (before === undefined) return `<span class="muted">new</span> ${now}${unit}`;
+  if (now === undefined) return `${before}${unit} <span class="arrow">→</span><span class="muted">not called</span>`;
+  const change = now - before;
+  const big = Math.abs(change) > Math.max(0.05, Math.abs(before) * (noisy ? 0.2 : 0.1));
+  const cls = !big || noisy === 'few' ? 'muted' : change < 0 ? 'better' : 'worse';
+  const fmt = (n) => (Number.isInteger(n) ? n : n.toFixed(digits));
+  return `${fmt(before)}<span class="arrow">→</span><span class="${cls}">${fmt(now)}</span>${unit}`;
+}
+
+function renderCompare() {
+  const form = `<div class="snapbar"><input id="snap-name" placeholder="before-fix" aria-label="Snapshot name" maxlength="40" />
+    <button class="primary" id="snap-save" type="button">Save snapshot of now</button>
+    ${snapshots.length ? `<span class="muted" style="margin-left:12px;font-size:12px">compare now with</span><select id="snap-pick" aria-label="Snapshot to compare with">${snapshots.map((x) => `<option value="${esc(x.name)}" ${x.name === compareTo ? 'selected' : ''}>${esc(x.name)} (${new Date(x.at).toLocaleString()})</option>`).join('')}</select>` : ''}</div>`;
+  if (!snapshots.length) return form + `<div class="empty"><b>No snapshots yet</b>Save one now, change your code, restart, use the same pages again, then come back to see what changed per route. Snapshots are kept in .backlens/snapshots in your project.</div>`;
+  const snap = snapshots.find((x) => x.name === compareTo);
+  const before = new Map(snap.routes.map((r) => [r.route, r]));
+  const now = new Map(state.routes.filter((r) => r.calls).map((r) => [r.route, r]));
+  const all = [...new Set([...before.keys(), ...now.keys()])].sort();
+  return form + `<p class="note">Left of each arrow: ${esc(snap.name)}, ${snap.requests} requests. Right: now, ${state.total} requests. Green is better. Timings only count as a change with 5 or more calls on both sides.</p><table>
+    <thead><tr><th>route</th><th class="n">queries / req</th><th class="n">redis / req</th><th class="n">p50</th><th class="n">issues</th></tr></thead>
+    <tbody>${all.map((route) => { const b = before.get(route) || {}; const n = now.get(route) || {}; const [m, p] = split(route); return `<tr>
+      <td><span class="method">${esc(m)}</span><span class="route">${esc(p)}</span></td>
+      <td class="n">${delta(b.queries, n.queries, '')}</td><td class="n">${delta(b.redis, n.redis, '')}</td>
+      <td class="n" title="${(b.calls || 0) < 5 || (n.calls || 0) < 5 ? 'Too few calls on one side to call this a change.' : ''}">${delta(b.p50 === undefined ? undefined : Math.round(b.p50 * 10) / 10, n.p50 === undefined ? undefined : Math.round(n.p50 * 10) / 10, ' ms', 1, (b.calls || 0) < 5 || (n.calls || 0) < 5 ? 'few' : true)}</td>
+      <td class="n">${delta(b.issues, n.issues, '', 0)}</td></tr>`; }).join('')}</tbody></table>`;
+}
+
+let agentUsage = null;
+async function loadAgentUsage() {
+  const res = await api('/api/agent-usage');
+  agentUsage = res.ok ? await res.json() : { prompts: [], sessions: [], days: 30, error: true };
+}
+const kTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(n));
+const cost = (n) => (n === null || n === undefined ? '?' : n < 0.01 ? '$' + n.toFixed(4) : '$' + n.toFixed(2));
+const secs = (s) => (s < 90 ? s + ' s' : Math.round(s / 60) + ' min');
+
+const pctUsed = (n) => (n === null || n === undefined ? null : n < 1 ? 'under 1%' : Math.round(n) + '%');
+
+function renderAgents() {
+  const u = agentUsage;
+  if (!u) return '<div class="empty"><b>Reading Claude Code logs…</b></div>';
+  if (!u.prompts.length)
+    return `<div class="empty"><b>No agent work yet</b>When Claude Code uses backlens through <code>backlens mcp</code>, each prompt shows here with what it used, read from Claude Code's own logs (counts only, never your prompts or code). Last ${u.days} days.</div>`;
+  const onPlan = u.plan && u.plan.kind === 'plan';
+  const [last] = u.prompts;
+  const w = last.without;
+  const tools = (t) => Object.entries(t.backlensTools).map(([n, c]) => `${esc(n)}${c > 1 ? ' ×' + c : ''}`).join(', ');
+  const used = (t) => (onPlan ? (t.limits.five === null ? '<span class="muted">not recorded</span>' : `${pctUsed(t.limits.five)}${t.limits.seven !== null ? ` <span class="muted">· ${pctUsed(t.limits.seven)} wk</span>` : ''}`) : cost(t.usd));
+  const totalUsd = u.prompts.reduce((n, t) => n + (t.usd || 0), 0);
+  const billing = onPlan
+    ? `<p class="note"><b>Claude ${esc(u.plan.name)} plan:</b> a flat fee, so prompts are not billed one by one${u.plan.extraUsage ? ' (extra usage is on: past your limits it is billed)' : ''}. What a prompt really costs you is part of your 5-hour and weekly limits, as Claude Code reports them. ${u.recording ? '' : `<b>Not recorded yet:</b> run <code>backlens statusline --install</code> once; prompts after that show their share.`} The API price is shown only for comparison.</p>`
+    : `<p class="note">Costs at Anthropic API list prices${u.plan && u.plan.kind === 'api' ? ', which is what per-token billing charges' : ''}.</p>`;
+  return `<div class="chips" style="margin:4px 0 14px"><span class="chip">${u.prompts.length} prompts in ${u.days} days</span><span class="chip">${u.sessions.length} sessions</span>${onPlan ? `<span class="chip">Claude ${esc(u.plan.name)}</span>` : `<span class="chip">${cost(totalUsd)}</span>`}</div>
+  ${billing}
+  ${w ? `<p class="note"><b>Without backlens (estimate, latest prompt).</b> Finding these issues by reading code means going through up to ${kTok(w.sourceTokens)} tokens of source in ${w.sourceFiles} files. backlens handed the agent ${kTok(w.findingsTokens)}: <b>${Math.round(w.contextSaved * 100)}% less to read</b>. Reading code also gives no query counts or timings, so a fix can't be proven.</p>` : ''}
+  <table><thead><tr><th>when</th><th class="n">${onPlan ? '5-hour limit used' : 'cost'}</th>${onPlan ? '<th class="n">at API prices</th>' : ''}<th class="n">tokens</th><th class="n">written</th><th class="n">time</th><th>backlens calls</th><th class="n">reads</th><th class="n">edits</th><th>model</th></tr></thead>
+  <tbody>${u.prompts.map((t) => `<tr><td>${esc(new Date(t.start).toLocaleString())}</td><td class="n">${used(t)}</td>${onPlan ? `<td class="n muted">${cost(t.usd)}</td>` : ''}<td class="n" title="cache reads ${t.tokens.cacheRead.toLocaleString()}, cache writes ${t.tokens.cacheWrite.toLocaleString()}, input ${t.tokens.input.toLocaleString()}">${kTok(t.tokens.total)}</td><td class="n">${kTok(t.tokens.output)}</td><td class="n">${secs(t.seconds)}</td><td>${t.backlensCalls}: <span class="muted">${tools(t)}</span></td><td class="n">${t.fileReads}</td><td class="n">${t.edits}</td><td class="muted">${esc(t.models.join(', '))}</td></tr>`).join('')}</tbody></table>
+  <p class="note">One row per Claude Code prompt that called backlens, read from <code>~/.claude/projects</code>: token counts and tool names only.${onPlan ? ' Limit use comes from Claude Code\'s status line and covers all your Claude use in that time, chats included.' : ''} Other editors keep no such logs.</p>`;
+}
+
+function renderSetup() {
+  if (!cfg) return '';
+  const scripts = Object.entries(cfg.scripts || {});
+  if (!scripts.length) return `<div class="setup"><h1>No scripts in package.json</h1><p>backlens starts your app with one of the scripts in <code>${esc(cfg.root)}/package.json</code>. Run backlens from the folder that has your server's package.json, or start it with a command: <code>backlens -- node server.js</code>.</p></div>`;
+  const current = cfg.config || {};
+  const guessApp = current.app || ['dev', 'start:dev', 'start', 'serve'].find((n) => cfg.scripts[n]) || scripts[0][0];
+  const guessTest = current.test !== undefined && current.test !== null ? current.test : ['test', 'test:unit'].find((n) => cfg.scripts[n]) || '';
+  // Likely scripts first; the rest (build, lint, migrations…) fold away.
+  const isServer = ([n, c]) => /^(dev|start|serve|watch)\b|start:dev|:dev$/.test(n) || /\b(node|nest start|tsx watch|nodemon|ts-node|next (dev|start)|fastify start)\b/.test(c);
+  const isTest = ([n, c]) => /test|spec/.test(n) || /\b(vitest|jest|mocha|node --test|ava|tap)\b/.test(c);
+  const group = (list, likely, render, chosen) => {
+    const top = list.filter(likely);
+    const rest = list.filter((e) => !likely(e));
+    const restOpen = rest.some(([n]) => n === chosen) || !top.length;
+    return top.map(([n, c]) => render(n, c)).join('') + (rest.length ? `<details ${restOpen ? 'open' : ''}><summary class="hintline" style="cursor:pointer">other scripts (${rest.length})</summary>${rest.map(([n, c]) => render(n, c)).join('')}</details>` : '');
+  };
+  const opt = (group, name, cmd, checked) => `<label class="opt"><input type="radio" name="${group}" value="${esc(name)}" ${checked ? 'checked' : ''} /><span>${esc(name || 'none')}</span><code title="${esc(cmd)}">${esc(cmd)}</code></label>`;
+  return `<form class="setup" id="setup-form">
+    <h1>Set up backlens for ${esc(cfg.project)}</h1>
+    <p>Pick the scripts from package.json. backlens runs them with ${esc(cfg.pm)}, records every request, and remembers this in .backlens/config.json.</p>
+    <fieldset><legend>Start the app with</legend>${group(scripts, isServer, (n, c) => opt('app', n, c, n === guessApp), guessApp)}
+      <div class="hintline">A script that rebuilds on change (like dev or start:dev) means you never press restart.</div></fieldset>
+    <fieldset><legend>Run the tests with</legend>${group(scripts, isTest, (n, c) => opt('test', n, c, n === guessTest), guessTest)}${opt('test', '', 'no tests', !guessTest)}</fieldset>
+    <label class="toggle" style="margin-bottom:20px"><input type="checkbox" name="auto" ${current.autoRestart ? 'checked' : ''} /> restart the app when a file changes (for scripts that do not watch)</label>
+    ${cfg.needsSetup ? `<fieldset><legend>Explain and fix issues with</legend>
+      <label class="opt"><input type="radio" name="ai" value="ollama" checked /><span>Local model</span><code>free, private, runs on this computer</code></label>
+      <label class="opt"><input type="radio" name="ai" value="anthropic" /><span>Claude</span><code>your own API key, strongest fixes</code></label>
+      <label class="opt"><input type="radio" name="ai" value="" /><span>Later</span><code>change it any time in AI settings</code></label>
+      <div class="hintline">The next screen walks you through it. Nothing is downloaded or paid without a click.</div></fieldset>` : ''}
+    <div class="row-actions"><button class="primary" type="submit">${cfg.needsSetup ? 'Start app' : 'Save and restart'}</button>${!cfg.needsSetup ? '<button class="ghost" type="button" id="setup-cancel">Cancel</button>' : ''}<span class="error" role="alert">${esc(setupError)}</span></div>
+  </form>`;
+}
+
+// ---- open in editor ------------------------------------------------------------------
+// Links use the editor's own URL scheme; the browser hands them to the editor. Nothing runs on the server.
+const EDITORS = {
+  vscode: { name: 'VS Code', url: (p, l) => `vscode://file${encodeURI(p)}:${l}:1` },
+  cursor: { name: 'Cursor', url: (p, l) => `cursor://file${encodeURI(p)}:${l}:1` },
+  windsurf: { name: 'Windsurf', url: (p, l) => `windsurf://file${encodeURI(p)}:${l}:1` },
+  zed: { name: 'Zed', url: (p, l) => `zed://file${encodeURI(p)}:${l}` },
+  webstorm: { name: 'WebStorm', url: (p, l) => `webstorm://open?file=${encodeURIComponent(p)}&line=${l}` },
+  idea: { name: 'IntelliJ IDEA', url: (p, l) => `idea://open?file=${encodeURIComponent(p)}&line=${l}` },
+  copy: { name: 'Copy path', url: null },
+};
+let editor = (() => { try { return localStorage.getItem('backlens-editor') || 'vscode'; } catch { return 'vscode'; } })();
+if (!EDITORS[editor]) editor = 'vscode';
+
+/** Joins the project root and a relative path, resolving ../ (monorepo packages sit beside the app). */
+function absPath(rel) {
+  if (rel.startsWith('/')) return rel;
+  const parts = (cfg ? cfg.root : '').split('/');
+  for (const seg of rel.split('/')) {
+    if (seg === '..') parts.pop();
+    else if (seg && seg !== '.') parts.push(seg);
+  }
+  return parts.join('/') || '/';
+}
+
+/** "src/a.ts:12" as a link that opens the editor at that line. */
+function siteLink(site, extra = '') {
+  const m = String(site).match(/^(.*):(\d+)$/);
+  if (!m || !cfg) return `<span class="site ${extra}">${esc(site)}</span>`;
+  const abs = absPath(m[1]);
+  const ed = EDITORS[editor];
+  const title = ed.url ? `Open in ${ed.name}` : 'Copy the full path';
+  return ed.url
+    ? `<a class="site link-site ${extra}" href="${esc(ed.url(abs, m[2]))}" title="${esc(title)}: ${esc(abs)}:${m[2]}">${esc(site)}</a>`
+    : `<button type="button" class="site link-site ${extra}" data-copy-path="${esc(abs)}:${m[2]}" title="${esc(title)}">${esc(site)}</button>`;
+}
+
+function lineHtml(l) { return `<span class="${l.stream === 'err' ? 'err' : l.stream === 'sys' ? 'sys' : ''}">${esc(l.text)}</span>`; }
+
+function renderTests() {
+  if (!cfg) return '';
+  if (cfg.manual) return `<div class="empty"><b>Tests run from setup</b>This session runs a command you gave on the command line. Start backlens with no command to pick a test script, or use <code>backlens test -- your test command</code> in CI.</div>`;
+  const script = cfg.config && cfg.config.test;
+  if (!script) return `<div class="empty"><b>No test script picked</b>Choose one in Setup, then run your tests here. backlens records every request the tests make and checks them like real traffic.<div class="actions" style="justify-content:center"><button class="primary" type="button" id="setup-open-2">Open setup</button></div></div>`;
+  const running = testInfo && testInfo.status === 'running';
+  const r = testInfo && testInfo.report;
+  let body = '';
+  if (r) {
+    const fresh = r.issues.filter((i) => i.isNew);
+    const freshWarn = fresh.filter((i) => i.severity === 'warn');
+    body += `<div class="summary">${r.exitCode === 0 ? '<span class="good">tests passed</span>' : `<span class="bad">tests failed (exit ${r.exitCode})</span>`}, ${r.requests} requests (${r.queries} queries, ${r.redis} redis), ${r.routesCalled} of ${r.routesKnown} routes called.
+      ${freshWarn.length ? `<span class="bad">${freshWarn.length} new issue${freshWarn.length === 1 ? '' : 's'}: CI would fail.</span>` : '<span class="good">No new issues: CI would pass.</span>'}</div>`;
+    if (fresh.length) body += `<div class="actions" style="margin:0 0 14px"><button class="ghost" type="button" data-accept="${esc(JSON.stringify(fresh.map((i) => i.stableKey)))}">Accept all ${fresh.length} new as known${fresh.length !== freshWarn.length ? ` (${freshWarn.length} issue${freshWarn.length === 1 ? '' : 's'}, ${fresh.length - freshWarn.length} hint${fresh.length - freshWarn.length === 1 ? '' : 's'})` : ''}</button><span class="muted" style="font-size:12px;align-self:center">Saved to backlens.baseline.json. Commit it so CI agrees.</span></div>`;
+    body += r.issues.map((i, idx) => `<article class="issue ${i.severity}"><div class="bar"></div><div>
+      <h3><span class="tag ${i.isNew ? 'new' : 'known'}">${i.isNew ? 'new' : 'known'}</span>${esc(i.title)}${i.severity === 'hint' ? ' <span class="muted" style="font-weight:400">(hint)</span>' : ''}</h3>
+      <div class="meta"><span>${esc(i.route)}</span><span>seen in ${i.seen} of ${i.of} request${i.of === 1 ? '' : 's'}</span></div>
+      <div class="meta">${i.sites.map(siteLink).join('<span>→</span>')}</div>
+      <pre>${esc(i.sql)}</pre><div class="fix"><b>Fix:</b> ${esc(i.fix)}</div>
+      <div class="actions"><button class="ghost" type="button" data-ai-explain="tests:${idx}">Explain</button><button class="primary" type="button" data-ai-fix="tests:${idx}">Suggest fix</button>${i.isNew ? `<button class="ghost" type="button" data-accept="${esc(JSON.stringify([i.stableKey]))}">Accept as known</button>` : ''}<button class="link" type="button" data-trace="${esc(i.example)}" style="margin-top:0">Show me →</button></div>${explainBox(i.key)}</div></article>`).join('');
+    if (!r.issues.length) body += '<div class="empty" style="margin:40px auto"><b>No issues in the test run</b></div>';
+  } else if (!running) {
+    body = `<div class="empty" style="margin:60px auto"><b>Run your tests through backlens</b>Every request the tests make is checked. New issues are the ones CI would fail on; accept the ones you mean to keep.</div>`;
+  }
+  return `<div class="tests-head"><button class="primary" type="button" id="tests-run" ${running ? 'disabled' : ''}>${running ? 'Running…' : r ? 'Run again' : 'Run tests'}</button>
+      <span class="what">${esc(cfg.pm)} run ${esc(script)}</span><span class="error" role="alert">${esc(testError)}</span></div>
+    ${body}
+    ${testLines.length ? `<details class="output" ${running ? 'open' : ''}><summary>test output, ${testLines.length} lines</summary><pre class="out" id="test-out">${testLines.map(lineHtml).join('\n')}</pre></details>` : ''}`;
+}
+
+function renderApp() {
+  const bar = $('#appbar');
+  if (!appInfo || !cfg || cfg.needsSetup) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const name = cfg.manual ? cfg.manual : `${cfg.project}`;
+  const st = appInfo.status;
+  $('#app-dot').className = 'app-dot ' + (st === 'running' ? 'running' : st === 'crashed' ? 'crashed' : '');
+  $('#app-name').textContent = name;
+  $('#app-meta').innerHTML = st === 'running' ? `running${appInfo.port ? ` on :${appInfo.port}` : ''}${cfg.manual ? '' : `, ${esc(cfg.pm)} run ${esc(cfg.config.app)}`}`
+    : st === 'crashed' ? `<b>crashed (exit ${appInfo.exitCode})</b>, see logs` : st === 'idle' ? 'not started' : st;
+  $('#app-toggle').textContent = appInfo.pid ? 'Stop' : 'Start';
+  $('#app-toggle').disabled = !appInfo.pid && !appInfo.canStart;
+  $('#setup-open').hidden = Boolean(cfg.manual);
+  $('#auto-wrap').hidden = Boolean(cfg.manual);
+  $('#auto').checked = Boolean(appInfo.autoRestart);
+}
+
+function appendLines(el, lines) {
+  if (!el || !lines.length) return;
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
+  el.insertAdjacentHTML('beforeend', lines.map((l) => lineHtml(l) + '\n').join(''));
+  while (el.childNodes.length > 4000) el.removeChild(el.firstChild);
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+// ---- map -------------------------------------------------------------------------------
+let mapData = null;
+let mapAt = -1;
+let mapError = '';
+let mapLoading = false;
+let mapSel = null;
+let mapHover = null;
+const SERVICE = { postgres: ['postgres', 'var(--db)'], redis: ['redis', 'var(--redis)'], http: ['outgoing http', 'var(--http)'] };
+
+async function loadMap() {
+  if (mapLoading) return;
+  mapLoading = true;
+  try {
+    const res = await api('/api/map');
+    if (res.ok) { mapData = await res.json(); mapError = ''; }
+    else mapError = res.status === 404
+      ? 'This backlens session started before the Map existed. Press Ctrl+C in its terminal and start backlens again.'
+      : `The map could not load (${res.status}).`;
+  } catch {
+    mapError = 'backlens is not running. Start it again from your terminal.';
+  } finally {
+    // Remember which traffic this answer covers, so a failure is not retried in a loop.
+    mapAt = state.received;
+    mapLoading = false;
+  }
+}
+
+function renderMap() {
+  if (mapAt !== state.received && !mapLoading) loadMap().then(() => { if (tab === 'map') render(); });
+  if (mapError && !mapData) return `<div class="empty"><b>The map is not available</b>${esc(mapError)}</div>`;
+  if (!mapData) return '<p class="muted">Loading the map…</p>';
+  if (!mapData.routes.length) return `<div class="empty"><b>Your map draws itself from traffic</b>Use your app: every route you call appears on the left, and every table, Redis key and outside service it touches appears on the right, wired together.</div>`;
+  const flagged = new Set(mapData.edges.filter((e) => e.issues).flatMap((e) => [e.from, e.to]));
+  const appName = cfg ? (cfg.manual ? 'your app' : cfg.project) : 'your app';
+  const port = appInfo && appInfo.port ? ` :${appInfo.port}` : '';
+  const routeRow = (r) => { const [m, p] = split(r.id); return `<button type="button" class="mrow ${flagged.has(r.id) ? 'flag' : ''}" data-node="${esc(r.id)}" data-side="l"><span class="lbl"><em>${esc(m)}</em>${esc(p)}</span><span class="num">${r.calls}× ${ms(r.p50)}</span></button>`; };
+  const nodeRow = (n) => `<button type="button" class="mrow ${flagged.has(n.id) ? 'flag' : ''}" data-node="${esc(n.id)}" data-side="r"><span class="lbl">${esc(n.label)}</span><span class="num">${n.service === 'http' ? `${n.calls} calls` : `${n.reads} r${n.writes ? ` · <span class="w">${n.writes} w</span>` : ''}`}</span></button>`;
+  const services = ['postgres', 'redis', 'http'].map((sv) => [sv, mapData.nodes.filter((n) => n.service === sv)]).filter(([, list]) => list.length);
+  return `<div class="map-intro"><h2>Built from ${state.total} request${state.total === 1 ? '' : 's'}. Click a route or a table.</h2>
+      <div class="map-legend"><span><i></i>wire: the route touches it</span><span><i class="thick"></i>more calls per request</span><span><i class="bad"></i>an issue on this wire</span></div></div>
+    <div class="map-wrap"><div class="map ${mapSel || mapHover ? 'focus' : ''}" id="map">
+      <svg class="wires" id="wires" aria-hidden="true"></svg>
+      <div><div class="zone"><span class="zone-label"><i style="background:var(--accent)"></i><b>${esc(appName)}</b>${esc(port)} · ${mapData.routes.length} route${mapData.routes.length === 1 ? '' : 's'} called</span>${mapData.routes.map(routeRow).join('')}</div></div>
+      <div class="gap"></div>
+      <div>${services.map(([sv, list]) => `<div class="zone"><span class="zone-label"><i style="background:${SERVICE[sv][1]}"></i><b>${SERVICE[sv][0]}</b>${list.length} ${sv === 'postgres' ? 'table' : sv === 'redis' ? 'key group' : 'host'}${list.length === 1 ? '' : 's'}</span>${list.map(nodeRow).join('')}</div>`).join('')}</div>
+    </div><aside class="map-side" id="map-side">${renderMapSide()}</aside></div>`;
+}
+
+function renderMapSide() {
+  const id = mapSel;
+  if (!id) return `<h3>How to read this</h3><p class="tip">Left: the routes your app served. Right: every table, Redis key group and outside host they touched. A wire means the route used it; a thicker wire means more calls per request; red means backlens found an issue on that wire.<br><br>Click anything to see who talks to what.</p>`;
+  const route = mapData.routes.find((r) => r.id === id);
+  const node = mapData.nodes.find((n) => n.id === id);
+  if (route) {
+    const out = mapData.edges.filter((e) => e.from === id).sort((a, b) => b.perRequest - a.perRequest);
+    const node = (to) => mapData.nodes.find((n) => n.id === to);
+    const issues = state.issues.filter((i) => i.route === id).length;
+    return `<h3>${esc(id)}</h3><div class="sub">${route.calls} call${route.calls === 1 ? '' : 's'}, p50 ${ms(route.p50)}${route.errors ? `, <span class="s5">${route.errors} errors</span>` : ''}</div>
+      <table><tbody>${out.map((e) => { const n = node(e.to); return `<tr><td>${esc(SERVICE[n.service][0] === 'postgres' ? '' : SERVICE[n.service][0] + ' ')}${esc(n.label)}</td><td class="n">${e.perRequest}/req</td><td class="n muted">${ms(e.ms / route.calls)}</td></tr>`; }).join('')}</tbody></table>
+      ${issues ? `<p class="tip" style="margin-top:12px"><button class="link" type="button" data-goto="issues" style="margin:0">${issues} issue${issues === 1 ? '' : 's'} on this route →</button></p>` : ''}
+      <p class="tip" style="margin-top:10px"><button class="link" type="button" data-route-requests="${esc(id)}" style="margin:0">See its requests →</button></p>`;
+  }
+  if (node) {
+    const inc = mapData.edges.filter((e) => e.to === id).sort((a, b) => b.calls - a.calls);
+    const adv = node.service === 'postgres' ? (mapData.advice || []).filter((a) => a.table === node.label) : [];
+    return `<h3>${esc(node.label)}</h3><div class="sub">${esc(SERVICE[node.service][0])}, ${node.calls} call${node.calls === 1 ? '' : 's'}${node.service !== 'http' ? ` (${node.reads} read, ${node.writes} write)` : ''}, ${ms(node.ms)} in total</div>
+      <div class="tip" style="margin-bottom:6px">Touched by ${inc.length} route${inc.length === 1 ? '' : 's'}:</div>
+      <table><tbody>${inc.map((e) => `<tr><td>${esc(e.from)}</td><td class="n">${e.perRequest}/req</td></tr>`).join('')}</tbody></table>
+      ${adv.map((a) => `<p class="tip" style="margin-top:12px;color:var(--warn)">No index for ${esc(a.columns.join(', '))}. <button class="link" type="button" data-goto="issues" style="margin:0">See the fix →</button></p>`).join('')}`;
+  }
+  return '';
+}
+
+/** Wires are drawn after layout, from each row's real position. */
+function drawWires() {
+  const map = $('#map'), svg = $('#wires');
+  if (!map || !svg || !mapData) return;
+  const box = map.getBoundingClientRect();
+  const pos = {};
+  map.querySelectorAll('[data-node]').forEach((el) => {
+    const r = el.getBoundingClientRect();
+    pos[el.dataset.node] = { l: r.left - box.left, r: r.right - box.left, y: r.top - box.top + r.height / 2 };
+  });
+  const focus = mapSel || mapHover;
+  const maxPer = Math.max(1, ...mapData.edges.map((e) => e.perRequest));
+  const on = new Set();
+  let paths = '';
+  const ordered = [...mapData.edges].sort((a, b) => (a.issues ? 1 : 0) - (b.issues ? 1 : 0));
+  for (const e of ordered) {
+    const a = pos[e.from], b = pos[e.to];
+    if (!a || !b) continue;
+    const active = focus && (e.from === focus || e.to === focus);
+    if (active) { on.add(e.from); on.add(e.to); }
+    const x1 = a.r, x2 = b.l, mid = (x2 - x1) / 2;
+    const w = 1 + (e.perRequest / maxPer) * 3;
+    const color = e.issues ? 'var(--err)' : active ? 'var(--accent)' : '#2c3245';
+    const opacity = focus ? (active ? 1 : 0.12) : e.issues ? 0.8 : 0.9;
+    paths += `<path d="M${x1} ${a.y} C${x1 + mid} ${a.y}, ${x2 - mid} ${b.y}, ${x2} ${b.y}" stroke="${color}" stroke-width="${w}" opacity="${opacity}"><title>${esc(e.from)} → ${esc(e.to.replace(/^\w+:/, ''))}: ${e.perRequest} per request</title></path>`;
+  }
+  svg.innerHTML = paths;
+  map.querySelectorAll('[data-node]').forEach((el) => {
+    el.classList.toggle('sel', el.dataset.node === mapSel);
+    el.classList.toggle('on', Boolean(focus) && on.has(el.dataset.node));
+  });
+  map.classList.toggle('focus', Boolean(focus));
+}
+window.addEventListener('resize', () => { if (tab === 'map') drawWires(); });
+
+// ---- AI: explain and fix -------------------------------------------------------------
+const explained = new Map();
+let fixJob = null;
+let fixFetchedAt = Date.now();
+let fixError = '';
+let aiStatus = null;
+const usd = (n) => (n === 0 ? 'free' : n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
+const ICON = { running: '<span class="spin"></span>', pass: '<span class="s2">✓</span>', fail: '<span class="s5">✕</span>', skip: '<span class="muted">–</span>' };
+
+function issueFrom(ref) {
+  const [src, i] = ref.split(':');
+  return src === 'tests' ? testInfo && testInfo.report && testInfo.report.issues[Number(i)] : state.issues[Number(i)];
+}
+
+function explainBox(key) {
+  const e = explained.get(key);
+  if (!e) return '';
+  if (e.loading) return `<div class="ai-box"><span class="spin"></span> Explaining…</div>`;
+  if (e.error) return `<div class="ai-box"><span class="error">${esc(e.error)}</span></div>`;
+  return `<div class="ai-box"><p><b>${esc(e.summary)}</b></p><p>${esc(e.why_it_matters)}</p><p>${esc(e.how_to_fix)}</p><div class="by">by ${esc(e.by)}, ${usd(e.costUsd)}</div></div>`;
+}
+
+async function aiPost(path, body) {
+  const res = await api(path, { method: 'POST', body: JSON.stringify(body || {}) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+  return data;
+}
+
+/** Light syntax colouring for code lines: comments, strings, keywords, numbers. */
+function hl(code) {
+  const re = /(\/\/.*$)|('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`)|\b(async|await|const|let|var|return|if|else|for|of|in|new|function|class|export|import|from|private|public|protected|readonly|static|this|true|false|null|undefined|throw|try|catch|type|interface|as)\b|\b(\d+(?:\.\d+)?)\b/g;
+  let out = '';
+  let last = 0;
+  for (const m of code.matchAll(re)) {
+    out += esc(code.slice(last, m.index));
+    out += `<span class="t${m[1] ? 'c' : m[2] ? 's' : m[3] ? 'k' : 'n'}">${esc(m[0])}</span>`;
+    last = m.index + m[0].length;
+  }
+  return out + esc(code.slice(last));
+}
+
+function codePanel(d) {
+  const row = (cls, n, mark, text) => `<div class="cl ${cls}"><span class="ln">${n ?? ''}</span><span class="mk">${mark}</span><span class="cx">${hl(text) || ' '}</span></div>`;
+  return `<div class="editor"><div class="editor-head"><span class="dots"><i></i><i></i><i></i></span>${siteLink(`${d.file}:${d.line}`)}<span class="muted">${d.removed.length ? `−${d.removed.length}` : ''} ${d.added.length ? `+${d.added.length}` : ''}</span></div>
+    <div class="editor-body">${d.before.map((l) => row('ctx', l.n, ' ', l.text)).join('')}${d.removed.map((l) => row('del', l.n, '−', l.text)).join('')}${d.added.map((l) => row('add', l.n, '+', l.text)).join('')}${d.after.map((l) => row('ctx', l.n, ' ', l.text)).join('')}</div></div>`;
+}
+
+const DOT = { done: 'ok', fail: 'bad', warn: 'warnd', skip: 'skip', running: 'run' };
+function feedItem(e) {
+  const dot = `<span class="dot ${DOT[e.status] || 'ok'}">${e.status === 'running' ? '<span class="spin"></span>' : e.status === 'skip' ? '○' : '●'}</span>`;
+  const t = `<span class="ft">${(e.at / 1000).toFixed(1)}s</span>`;
+  if (e.kind === 'say') {
+    return `<li class="fi say">${dot}<div><div class="bubble">${esc(e.title)}${e.confidence ? `<span class="conf ${esc(e.confidence)}">${esc(e.confidence)} confidence</span>` : ''}</div>${e.notes ? `<div class="note">${esc(e.notes)}</div>` : ''}</div></li>`;
+  }
+  if (e.kind === 'edit') return `<li class="fi">${dot}<div><div class="fh"><b>Update</b> ${esc(e.title.replace(/^Update /, ''))}${t}</div>${codePanel(e.diff)}</div></li>`;
+  if (e.kind === 'cmd') {
+    return `<li class="fi">${dot}<div><div class="fh"><b>${esc(e.title)}</b> <code>${esc(e.command || '')}</code>${t}</div><pre class="term" data-autoscroll>${esc(e.output || (e.status === 'running' ? 'starting…' : ''))}</pre></div></li>`;
+  }
+  if (e.kind === 'ask') {
+    const secs = e.status === 'running' && e.startedAt && fixJob ? Math.max(0.1, (fixJob.now - e.startedAt) / 1000 + (Date.now() - fixFetchedAt) / 1000) : 0;
+    const live = e.status === 'running' ? `${secs.toFixed(0)} s${e.tokens ? `, ${e.tokens} tokens, ${(e.tokens / secs).toFixed(1)} per second` : ', reading the code…'}` : esc(e.detail || '');
+    // A local model under ~8 tokens a second takes minutes per answer: say why, and what helps.
+    const slow = e.status === 'running' && fixJob.route && fixJob.route.kind === 'ollama' && secs > 15 && e.tokens / secs < 8;
+    const hint = slow ? `<div class="sub2 muted">The local model is slow on this computer (it shares memory with your other apps). Closing some speeds it up; Claude answers in seconds.</div>` : '';
+    return `<li class="fi">${dot}<div><div class="fh"><b>${esc(e.title)}</b>${t}</div><div class="sub2">${live}</div>${hint}${e.status === 'running' ? '<button class="ghost" type="button" id="fix-stop" style="margin-top:6px">Stop</button>' : ''}</div></li>`;
+  }
+  if (e.kind === 'verdict') return `<li class="fi">${dot}<div class="verdict ${e.status === 'done' ? 'good' : e.status === 'warn' ? 'meh' : 'bad'}">${esc(e.title)}</div></li>`;
+  const verb = e.kind === 'read' ? 'Read' : e.kind === 'repair' ? '↻' : '';
+  const title = e.kind === 'read' ? e.title.replace(/^Read /, '') : e.title;
+  return `<li class="fi ${e.kind}">${dot}<div><div class="fh">${verb ? `<b>${verb}</b> ` : ''}${esc(title)}${t}</div>${e.detail ? `<div class="sub2">${esc(e.detail)}</div>` : ''}</div></li>`;
+}
+
+function renderFix() {
+  const el = $('#fix');
+  el.hidden = !fixJob && !fixError;
+  if (el.hidden) return;
+  const j = fixJob;
+  const keepScroll = el.scrollTop;
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  if (!j) { el.innerHTML = `<button class="ghost close" type="button" id="fix-close">Close</button><h2>Fix</h2><p class="error">${esc(fixError)}</p>`; return; }
+  const r = j.route;
+  const busy = ['thinking', 'verifying', 'reverting'].includes(j.stage);
+  let html = `<div class="fix-head"><button class="ghost close" type="button" id="fix-close">Close</button>
+    <div class="kicker2">fix${j.attempt ? ', second attempt' : ''}</div><h2>${esc(j.issueTitle)}</h2><div class="meta">${esc(j.issueRoute || '')}</div>
+    <div class="chips" style="margin-top:10px"><span class="chip">${esc(r.label)}</span><span class="chip">${r.kind === 'anthropic' ? (j.costUsd ? `spent ${usd(j.costUsd)}` : `about ${usd(r.estimateUsd)}`) : 'free'}</span>${busy ? '<span class="chip live"><span class="spin"></span> working</span>' : ''}</div></div>`;
+  if (j.stage === 'template') {
+    html += `<ol class="feed"><li class="fi">${'<span class="dot ok">●</span>'}<div><div class="bubble">${esc(j.explanation)}</div></div></li></ol><div class="editor"><div class="editor-head"><span class="dots"><i></i><i></i><i></i></span>migration</div><div class="editor-body"><div class="cl add"><span class="ln">1</span><span class="mk">+</span><span class="cx">${hl(j.sql)}</span></div></div></div><p class="note">${esc(j.notes)}</p>${indexPanel(j)}`;
+    el.innerHTML = html;
+    if (!idx.db && !idx.loading) loadIndexInfo();
+    return;
+  }
+  if (j.stage === 'preview') {
+    html += `<section class="plan"><h4>Why this model</h4><ul class="reasons">${r.reasons.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+      <h4 style="margin-top:14px">What will be ${r.kind === 'anthropic' ? 'sent to Anthropic' : r.kind === 'ollama' ? 'given to the local model (stays on this machine)' : 'used (nothing leaves this machine)'}</h4>
+      <ol class="feed ghosted">${j.preview.map((p) => `<li class="fi read"><span class="dot skip">○</span><div><div class="fh"><b>Read</b> ${esc(p.path)}</div><div class="sub2">lines ${p.from}-${p.to}</div></div></li>`).join('')}</ol>
+      <p class="note">About ${j.tokens.toLocaleString()} tokens, plus the issue and its statements. Values that look like secrets are masked; .env files and node_modules are never read.${r.kind === 'anthropic' ? ` Today: ${usd(j.spentTodayUsd)} of your ${usd(j.budgetUsd)} budget.` : ''}</p></section>
+      <div class="fix-actions"><button class="primary" type="button" id="fix-send">Start</button><button class="ghost" type="button" id="fix-close-2">Cancel</button><span class="error" role="alert">${esc(fixError)}</span></div>`;
+    el.innerHTML = html; return;
+  }
+  html += `<ol class="feed">${j.events.map(feedItem).join('')}${j.stage === 'error' ? `<li class="fi"><span class="dot bad">●</span><div class="verdict bad">${esc(j.error)}</div></li>` : ''}</ol>`;
+  html += compareCard(j);
+  const act = [];
+  if (j.stage === 'proposed') act.push('<button class="primary" type="button" id="fix-apply">Apply and check</button><button class="ghost" type="button" id="fix-close-2">Discard</button>');
+  if (j.stage === 'no-edits') act.push(`<span class="note">No change was applied.</span>${escalateBtn(j)}`);
+  if (j.stage === 'verified') act.push('<button class="primary" type="button" id="fix-keep">Keep it</button><button class="ghost" type="button" id="fix-revert">Revert</button>');
+  if (j.stage === 'failed') act.push('<button class="primary" type="button" id="fix-revert">Revert</button><button class="ghost" type="button" id="fix-keep">Keep anyway</button>');
+  if (j.stage === 'unverified') act.push('<button class="ghost" type="button" id="fix-keep">Keep</button><button class="ghost" type="button" id="fix-revert">Revert</button>');
+  if (j.stage === 'reverted' || j.stage === 'error') act.push(escalateBtn(j));
+  if (j.stage === 'proposed') act.push('<span class="note">backlens keeps an exact copy of each file first, uncommitted changes included. Revert puts it back.</span>');
+  if (act.length || fixError) html += `<div class="fix-actions">${act.join('')}<span class="error" role="alert">${esc(fixError)}</span></div>`;
+  el.innerHTML = html;
+  el.querySelectorAll('[data-autoscroll]').forEach((t) => (t.scrollTop = t.scrollHeight));
+  el.scrollTop = atBottom || busy ? el.scrollHeight : keepScroll;
+}
+
+/** The same request before and after the change, side by side. */
+function compareCard(j) {
+  const c = j.compare;
+  if (!c || !c.before || !['verified', 'failed', 'unverified', 'kept', 'reverted'].includes(j.stage)) return '';
+  const pct = (a, b) => (a ? Math.round(((b - a) / a) * 100) : 0);
+  const row = (label, a, b, fmt = (x) => x) => {
+    const d = pct(a, b);
+    const tone = a === b ? 'same' : b < a ? 'better' : 'worse';
+    return `<tr><th>${label}</th><td>${fmt(a)}</td><td class="arrow">→</td><td class="${tone}">${fmt(b)}</td><td class="${tone} delta">${tone === 'same' ? '' : `${d > 0 ? '+' : ''}${d}%`}</td></tr>`;
+  };
+  // Time gets a verdict only when both sides were warm replays and their p25-p75 ranges do not
+  // overlap (see shared/compare.js); otherwise it is shown plain, with no percentage.
+  const ch = c.change;
+  const timeTone = ch && ch.verdict === 'faster' ? 'better' : ch && ch.verdict === 'slower' ? 'worse' : 'same';
+  const timeNote = !ch ? (c.beforeKind === 'recorded' ? 'not compared' : '') : ch.verdict === 'same' ? 'within noise' : `${ch.pct > 0 ? '+' : ''}${ch.pct}%`;
+  const range = (t) => (t.lo != null && t.hi != null && t.runs > 1 ? ` <span class="delta" style="color:var(--sub)">${t.lo}-${t.hi}</span>` : '');
+  return `<section class="compare-card"><h4>Same request, before and after the change</h4><table>
+    <tr><th>time (median)</th><td>${ms(c.before.ms)}${range(c.before)}</td><td class="arrow">→</td><td class="${timeTone}">${ms(c.after.ms)}${range(c.after)}</td><td class="${timeTone} delta">${timeNote}</td></tr>
+    ${row('database queries', c.before.queries, c.after.queries)}
+    ${c.before.redis || c.after.redis ? row('redis calls', c.before.redis, c.after.redis) : ''}
+    ${c.before.http || c.after.http ? row('outgoing http', c.before.http, c.after.http) : ''}
+    <tr><th>status</th><td>${c.before.status}</td><td class="arrow">→</td><td class="${c.before.status === c.after.status ? 'same' : 'worse'}">${c.after.status}</td><td></td></tr>
+    <tr><th>issue</th><td>found</td><td class="arrow">→</td><td class="${c.issueGone ? 'better' : 'worse'}">${c.issueGone ? 'gone' : 'still there'}</td><td></td></tr>
+  </table><p class="note">Before: ${c.beforeKind === 'recorded' ? `${c.beforeRuns} recorded request${c.beforeRuns === 1 ? '' : 's'} (may include cold ones, so time is not compared)` : `${c.beforeRuns} warm replay${c.beforeRuns === 1 ? '' : 's'} of the old code`}. After: ${c.afterRuns} replay${c.afterRuns === 1 ? '' : 's'}${c.warmed ? ', after warming the restarted app up' : ''}. Ranges are p25-p75. Query counts are exact; a time change counts only when the ranges do not overlap.</p></section>`;
+}
+
+// ---- creating a suggested index from the drawer ----------------------------------------
+let idx = {};
+async function loadIndexInfo() {
+  idx.loading = true;
+  try { idx.db = await aiPost('/api/index/info', { key: fixJob && fixJob.issueKey }); } catch (err) { idx.dbError = err.message; }
+  idx.loading = false;
+  renderFix();
+}
+
+function indexPanel(j) {
+  const where = idx.db ? `<b>${esc(idx.db.database)}</b> on ${esc(idx.db.host)}${idx.db.port ? `:${idx.db.port}` : ''}` : idx.dbError ? '' : 'checking…';
+  const steps = [];
+  if (idx.result && idx.result.created) {
+    steps.push(`<li class="fi"><span class="dot ok">●</span><div><div class="fh"><b>Created</b> ${esc(idx.result.index.name)}</div><div class="sub2">on ${where}, built without blocking writes</div></div></li>`);
+    const u = idx.result.usable;
+    steps.push(`<li class="fi"><span class="dot ${u ? 'ok' : u === false ? 'bad' : 'skip'}">●</span><div><div class="fh"><b>Plan check</b></div><div class="sub2">${u ? 'Postgres can answer this query from the new index.' : u === false ? 'Postgres would still not use it for this query.' : 'Could not check the plan for this query.'}</div></div></li>`);
+  }
+  if (idx.dropped) steps.push(`<li class="fi"><span class="dot skip">●</span><div><div class="fh"><b>Dropped</b> the index again</div></div></li>`);
+  const actions = idx.result && idx.result.created
+    ? `<button class="ghost" type="button" id="idx-drop" ${idx.busy ? 'disabled' : ''}>Undo (drop it)</button><button class="ghost" type="button" data-copy="${esc(j.sql)}">Copy SQL for a migration</button>`
+    : `<button class="primary" type="button" id="idx-create" ${idx.busy || !idx.db ? 'disabled' : ''}>${idx.busy ? 'Creating…' : 'Create on this database'}</button><button class="ghost" type="button" data-copy="${esc(j.sql)}">Copy SQL</button>`;
+  return `${steps.length ? `<ol class="feed">${steps.join('')}</ol>` : ''}
+    <p class="note">${idx.dbError ? esc(idx.dbError) : `Runs on the database your app is connected to right now: ${where}. Only use it on a development database.`}${idx.result && idx.result.created ? ' This changed only this database: add the SQL to a migration so other environments get it too.' : ''}</p>
+    <div class="fix-actions">${actions}<span class="error" role="alert">${esc(idx.error || '')}</span></div>`;
+}
+
+document.addEventListener('click', async (e) => {
+  const create = e.target.closest('#idx-create');
+  const drop = e.target.closest('#idx-drop');
+  if (!create && !drop) return;
+  idx.busy = true; idx.error = ''; renderFix();
+  try {
+    if (create) { idx.result = await aiPost('/api/index/create', { key: fixJob.issueKey }); idx.dropped = false; }
+    else { await aiPost('/api/index/drop', { key: fixJob.issueKey }); idx.result = null; idx.dropped = true; }
+    lastTotal = -1; poll();
+  } catch (err) { idx.error = err.message; }
+  idx.busy = false;
+  renderFix();
+});
+
+function escalateBtn(j) {
+  if (j.errorCode === 'billing') return `<a class="btn primary" href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">Add credits</a>`;
+  return j.attempt === 0 && j.route.kind === 'anthropic' ? `<button class="ghost" type="button" id="fix-escalate">Try a stronger model</button>` : '';
+}
+
+async function pollFix() {
+  if (!fixJob || !['thinking', 'verifying', 'reverting'].includes(fixJob.stage)) return;
+  try {
+    const res = await api('/api/ai/fix/' + fixJob.id);
+    if (res.ok) { fixJob = await res.json(); fixFetchedAt = Date.now(); renderFix(); }
+  } catch {}
+}
+setInterval(pollFix, 600);
+
+let aiNotice = '';
+const gb = (n) => `${n.toFixed(1)} GB`;
+
+/** The local model card's body: install, open, download, then ready. Polled while the panel is open. */
+function localBody(o, s) {
+  if (!o.running && !o.installed) {
+    return `<small>Runs an AI model on this computer: free, and your code never leaves it. Install Ollama, open it, and this card updates by itself.</small>
+      <span class="field"><a class="btn primary" href="https://ollama.com/download" target="_blank" rel="noopener">Get Ollama</a><span class="muted">waiting for Ollama…</span></span>`;
+  }
+  if (!o.running) {
+    return `<small>Ollama is installed but not running. Open the Ollama app; this card updates by itself.</small>
+      <span class="field"><span class="muted">waiting for Ollama…</span></span>`;
+  }
+  const names = [...new Set([...o.catalog.map((m) => m.name), ...o.models])];
+  const info = (n) => o.catalog.find((m) => m.name === n);
+  const label = (n) => {
+    const m = info(n);
+    const have = o.models.includes(n);
+    return `${n}${n === o.recommended ? ' (best for this computer)' : ''}${have ? ' · downloaded' : m ? ` · ${gb(m.sizeGb)} download` : ''}`;
+  };
+  const chosen = s.ollamaModel;
+  const ready = o.models.includes(chosen);
+  const pull = o.pull && o.pull.model === chosen ? o.pull : null;
+  let action = '';
+  if (pull && !pull.done) {
+    const pct = pull.total ? Math.floor((pull.completed / pull.total) * 100) : 0;
+    action = `<div class="progress"><div style="width:${pct}%"></div></div>
+      <span class="field"><span class="muted">${pull.total ? `${pct}% of ${gb(pull.total / 1024 ** 3)}` : esc(pull.status)}</span><button class="ghost" type="button" id="ai-pull-stop">Stop</button></span>`;
+  } else if (!ready) {
+    const m = info(chosen);
+    action = `<span class="field"><button class="primary" type="button" id="ai-pull" data-model="${esc(chosen)}">Download ${esc(chosen)}${m ? ` (${gb(m.sizeGb)})` : ''}</button>
+      ${pull && pull.error ? `<span class="error">${esc(pull.error)}</span>` : ''}</span>`;
+  }
+  const note = info(chosen) ? `<small>${esc(chosen)} ${esc(info(chosen).note)} This computer has ${o.ramGb} GB of memory.</small>` : '';
+  return `<small>${ready ? 'Ready. Code never leaves this machine.' : 'Ollama is running. Download a model to use it.'}</small>
+    <span class="field">model <select name="ollamaModel">${names.map((n) => `<option value="${esc(n)}" ${n === chosen ? 'selected' : ''}>${esc(label(n))}</option>`).join('')}</select></span>
+    ${action}${note}`;
+}
+
+function claudeBody(a, s) {
+  const keyLine = a.configured
+    ? `<span class="field"><span>Using the key ending in <code>${esc(a.last4 || '…')}</code>, ${a.source === 'env' ? 'from ANTHROPIC_API_KEY' : a.source === 'saved' ? 'saved on this computer' : 'from your environment'}.</span>${a.source === 'saved' ? '<button class="ghost" type="button" id="ai-key-remove">Remove</button>' : ''}</span>`
+    : `<span class="field"><input type="password" id="ai-key" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" /><button class="primary" type="button" id="ai-key-save">Check and save</button></span>
+       <small>Create one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>. Checking it is free. It is saved in your user folder (~/.config/backlens), never in this project, and never shown again.</small>`;
+  return `<small>The strongest fixes. backlens picks Haiku, Sonnet or Opus per issue and shows the cost before sending.</small>
+    ${keyLine}
+    <span class="field">daily budget $ <input type="number" name="dailyBudgetUsd" min="0" step="0.5" value="${s.dailyBudgetUsd}" /> <span>spent today ${usd(aiStatus.spentTodayUsd)}</span></span>`;
+}
+
+async function renderAISettings() {
+  const el = $('#aiset');
+  try { aiStatus = await (await api('/api/ai/status')).json(); } catch { el.innerHTML = '<p class="error">Could not load AI settings.</p>'; return; }
+  const s = aiStatus.settings, o = aiStatus.ollama, a = aiStatus.anthropic;
+  el.innerHTML = `<button class="ghost close" type="button" id="aiset-close">Close</button><h2>AI settings</h2><p class="muted" style="font-size:13px">Who explains issues and suggests fixes. Changes save as you make them.</p>
+    <p class="muted" style="font-size:12px">Some fixes never need a model: running independent calls together (Promise.all) and missing indexes are written by backlens itself.</p>
+    <form id="aiset-form"><section>
+      <div class="opt-card ${s.provider === 'ollama' ? 'on' : ''}"><label><input type="radio" name="provider" value="ollama" ${s.provider === 'ollama' ? 'checked' : ''}/> <b>Local model</b> <span class="chip">free</span> <span class="chip">private</span></label>
+        <div id="ai-local">${localBody(o, s)}</div></div>
+      <div class="opt-card ${s.provider === 'anthropic' ? 'on' : ''}"><label><input type="radio" name="provider" value="anthropic" ${s.provider === 'anthropic' ? 'checked' : ''}/> <b>Claude, with your own key</b> <span class="chip">paid by you</span></label>
+        <div id="ai-claude">${claudeBody(a, s)}</div></div>
+      <div class="opt-card ${s.provider === 'mock' ? 'on' : ''}"><label><input type="radio" name="provider" value="mock" ${s.provider === 'mock' ? 'checked' : ''}/> <b>No model</b> <span class="chip">free</span></label>
+        <small>Explanations in backlens's own words. Fixes only where backlens can write them itself.</small></div>
+    </section>
+    <label class="toggle" style="margin:6px 0 6px"><input type="checkbox" name="replay" ${s.replay ? 'checked' : ''}/> keep recent requests in memory so a fix can be replayed (never written to disk, never sent to a model)</label>
+    <label class="toggle" style="margin:0 0 16px"><input type="checkbox" name="replayWrites" ${s.replayWrites ? 'checked' : ''}/> also replay requests that change data (POST, PUT, DELETE): they run again against your dev database</label>
+    <div class="actions"><span class="${aiNotice.startsWith('!') ? 'error' : 'muted'}" role="status" style="font-size:12px;align-self:center">${esc(aiNotice.replace(/^!/, ''))}</span><span class="muted" style="font-size:12px;align-self:center;margin-left:auto">${aiStatus.history} fix${aiStatus.history === 1 ? '' : 'es'} in local history</span></div></form>`;
+}
+
+// While the panel is open, follow Ollama starting and model downloads without redrawing the key box.
+setInterval(async () => {
+  if ($('#aiset').hidden || !aiStatus) return;
+  const o = aiStatus.ollama;
+  const waiting = !o.running || (o.pull && !o.pull.done) || !o.models.includes(aiStatus.settings.ollamaModel);
+  if (!waiting) return;
+  try {
+    const next = await (await api('/api/ai/status')).json();
+    const finished = o.pull && !o.pull.done && next.ollama.pull && next.ollama.pull.done;
+    aiStatus = next;
+    if (finished) { aiNotice = next.ollama.pull.error ? '!' + next.ollama.pull.error : `${next.ollama.pull.model} downloaded.`; return renderAISettings(); }
+    const box = $('#ai-local');
+    if (box && !box.contains(document.activeElement)) box.innerHTML = localBody(next.ollama, next.settings);
+  } catch {}
+}, 1500);
+
+async function saveAISettings() {
+  const f = new FormData($('#aiset-form'));
+  try {
+    await aiPost('/api/ai/settings', { provider: f.get('provider'), ollamaModel: f.get('ollamaModel') || aiStatus.settings.ollamaModel, dailyBudgetUsd: f.get('dailyBudgetUsd'), replay: f.get('replay') === 'on', replayWrites: f.get('replayWrites') === 'on' });
+    aiNotice = 'Saved.';
+  } catch (err) { aiNotice = '!' + err.message; }
+  renderAISettings();
+}
+document.addEventListener('change', (e) => { if (e.target.closest('#aiset-form') && e.target.id !== 'ai-key') saveAISettings(); });
+
+async function aiAction(button, path, body, done) {
+  button.disabled = true;
+  aiNotice = '';
+  try { await aiPost(path, body); aiNotice = done; } catch (err) { aiNotice = '!' + err.message; }
+  renderAISettings();
+}
+
+document.addEventListener('click', async (e) => {
+  const ex = e.target.closest('[data-ai-explain]');
+  if (ex) {
+    const issue = issueFrom(ex.dataset.aiExplain);
+    if (!issue) return;
+    explained.set(issue.key, { loading: true }); render();
+    try { explained.set(issue.key, await aiPost('/api/ai/explain', { key: issue.key })); }
+    catch (err) { explained.set(issue.key, { error: err.message }); }
+    render();
+    return;
+  }
+  const fx = e.target.closest('[data-ai-fix]');
+  if (fx) {
+    const issue = issueFrom(fx.dataset.aiFix);
+    if (!issue) return;
+    fixError = '';
+    idx = {};
+    try { fixJob = await aiPost('/api/ai/fix', { key: issue.key }); }
+    catch (err) { fixJob = null; fixError = err.message; }
+    renderFix();
+    return;
+  }
+  if (e.target.closest('#fix-close') || e.target.closest('#fix-close-2')) { fixJob = null; fixError = ''; renderFix(); return; }
+  for (const [id, action] of [['#fix-stop', 'stop'], ['#fix-send', 'send'], ['#fix-apply', 'apply'], ['#fix-keep', 'keep'], ['#fix-revert', 'revert'], ['#fix-escalate', 'escalate']]) {
+    const b = e.target.closest(id);
+    if (!b) continue;
+    b.disabled = true;
+    fixError = '';
+    try { fixJob = await aiPost(`/api/ai/fix/${fixJob.id}/${action}`); }
+    catch (err) { fixError = err.message; }
+    renderFix();
+    if (action === 'keep' || action === 'revert') { lastTotal = -1; poll(); }
+    return;
+  }
+  if (e.target.closest('#ai-pull')) { const b = e.target.closest('#ai-pull'); return aiAction(b, '/api/ai/ollama/pull', { model: b.dataset.model }, ''); }
+  if (e.target.closest('#ai-pull-stop')) return aiAction(e.target.closest('#ai-pull-stop'), '/api/ai/ollama/stop', {}, '');
+  if (e.target.closest('#ai-key-save')) {
+    const input = $('#ai-key');
+    const key = input.value.trim();
+    input.value = '';
+    if (!key) { aiNotice = '!Paste a key first.'; return renderAISettings(); }
+    aiNotice = 'Checking the key…';
+    $('#ai-key-save').textContent = 'Checking…';
+    return aiAction(e.target.closest('#ai-key-save'), '/api/ai/key', { key }, 'Key works and is saved. Pick Claude above to use it.');
+  }
+  if (e.target.closest('#ai-key-remove')) return aiAction(e.target.closest('#ai-key-remove'), '/api/ai/key/remove', {}, 'Key removed from this computer.');
+  if (e.target.closest('#ai-open')) { aiNotice = ''; $('#aiset').hidden = false; renderAISettings(); return; }
+  if (e.target.closest('#aiset-close')) { $('#aiset').hidden = true; return; }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (!$('#aiset').hidden) $('#aiset').hidden = true; else if (fixJob && !['thinking', 'verifying', 'reverting'].includes(fixJob.stage)) { fixJob = null; renderFix(); } } });
+
+function render() {
+  document.querySelectorAll('nav button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
+  const count = $('#issue-count');
+  count.hidden = !state.issues.length;
+  count.textContent = state.issues.length;
+  $('#live').classList.toggle('idle', !state.total);
+  $('#live-text').textContent = state.total ? `${state.total} request${state.total === 1 ? '' : 's'} recorded` : 'waiting for requests';
+  if (tab === 'compare' && document.activeElement && document.activeElement.id === 'snap-name') return;
+  const tc = $('#test-count');
+  const newIssues = testInfo && testInfo.report ? testInfo.report.issues.filter((i) => i.isNew && i.severity === 'warn').length : 0;
+  tc.hidden = !newIssues;
+  tc.textContent = newIssues;
+  if (showSetup || (cfg && cfg.needsSetup)) { $('#view').innerHTML = renderSetup(); return; }
+  if (tab === 'map') { $('#view').innerHTML = renderMap(); requestAnimationFrame(drawWires); return; }
+  $('#view').innerHTML = tab === 'routes' ? renderRoutes() : tab === 'issues' ? renderIssues() : tab === 'compare' ? renderCompare() : tab === 'agents' ? renderAgents() : tab === 'tests' ? renderTests() : renderRequests();
+}
+
+function renderDetail() {
+  const el = $('#detail');
+  $('#main').classList.toggle('split', Boolean(openTrace));
+  el.hidden = !openTrace;
+  if (!openTrace) return;
+  const { trace, issues } = openTrace;
+  const spans = [...trace.spans].sort((a, b) => a.start - b.start);
+  const total = Math.max(trace.duration, ...spans.map((s) => s.start + s.duration), 0.01);
+  const flagged = new Set(issues.flatMap((i) => i.sites));
+  const isFlagged = (s) => (s.frames || []).some((f) => flagged.has(`${f.file}:${f.line}`));
+  // Wall time spent waiting: overlapping calls count once.
+  let io = 0, reach = -Infinity;
+  for (const s of spans) { const stop = s.start + s.duration; if (stop > reach) { io += stop - Math.max(s.start, reach); reach = stop; } }
+  el.innerHTML = `
+    <div class="detail-head"><div style="flex:1;min-width:0"><div class="title">${esc(trace.method)} ${esc(trace.url)}</div><div class="meta">${esc(trace.route)}</div></div>
+      <button class="ghost" type="button" id="close" aria-label="Close request">Close</button></div>
+    <dl class="stats"><div><dt>status</dt><dd class="${statusClass(trace.status)}">${trace.status}</dd></div><div><dt>total</dt><dd>${ms(trace.duration)}</dd></div>
+      <div><dt>calls</dt><dd>${spans.length}</dd></div><div><dt>waiting on calls</dt><dd>${ms(io)}</dd></div></dl>
+    ${issues.length ? `<div class="pinned">${issues.map((i) => `<div class="pin ${i.severity}">${esc(i.title)}<span>${i.sites.map(siteLink).join(' → ')}</span></div>`).join('')}</div>` : ''}
+    <div class="wf">
+      <div class="legend"><span><i style="background:var(--db)"></i>postgres</span><span><i style="background:var(--redis)"></i>redis</span><span><i style="background:var(--http)"></i>http out</span></div>
+      <div class="axis"><span>0</span><span>${ms(total / 2)}</span><span>${ms(total)}</span></div>
+      ${spans.length ? '' : '<p class="muted mono" style="font-size:12px">This request made no database, Redis or outgoing HTTP calls.</p>'}
+      ${spans.map((s, i) => { const [label, color] = KIND[s.kind] || [s.kind, 'var(--step)']; return `
+        <button class="row ${isFlagged(s) ? 'flag' : ''}" type="button" data-span="${i}" aria-expanded="false">
+          <span class="name"><em>${label}</em><span>${esc(s.name)}</span></span>
+          <span class="track"><b style="left:${(s.start / total) * 100}%;width:${(s.duration / total) * 100}%;background:${color}"></b></span>
+          <span class="ms">${ms(s.duration)}</span>
+        </button>
+        <div class="open" id="span-${i}" hidden>
+          <pre>${esc(s.name)}</pre>
+          <div class="where">${(s.frames || []).map((f) => `<div>${esc(f.fn)} ${siteLink(`${f.file}:${f.line}`, 'muted')}</div>`).join('') || 'no app code on the stack'}
+          ${s.rows !== undefined ? `<div>${s.rows} row${s.rows === 1 ? '' : 's'}</div>` : ''}${s.hit !== undefined ? `<div>${s.hit ? 'cache hit' : 'cache miss'}</div>` : ''}${s.error ? '<div class="s5">failed</div>' : ''}
+          <div>started at ${ms(s.start)}</div></div>
+        </div>`; }).join('')}
+    </div>`;
+}
+
+async function openRequest(id) {
+  const res = await api('/api/trace/' + encodeURIComponent(id));
+  openTrace = res.ok ? await res.json() : null;
+  renderDetail();
+  render();
+}
+
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-tab]');
+  if (t) { tab = t.dataset.tab; if (tab !== 'requests') routeFilter = null; if (tab === 'compare') loadSnapshots().then(render); if (tab === 'agents') loadAgentUsage().then(render); render(); return; }
+  if (e.target.closest('#snap-save')) {
+    const name = $('#snap-name').value.trim() || 'snapshot-' + new Date().toISOString().slice(11, 19).replace(/:/g, '');
+    api('/api/snapshot?name=' + encodeURIComponent(name), { method: 'POST' }).then(loadSnapshots).then(() => { compareTo = snapshots[0] && snapshots[0].name; render(); });
+    return;
+  }
+  const r = e.target.closest('tr[data-route]:not(.idle)');
+  if (r) { routeFilter = r.dataset.route; tab = 'requests'; render(); return; }
+  const tr = e.target.closest('[data-trace]');
+  if (tr) { openRequest(tr.dataset.trace); return; }
+  if (e.target.closest('#unfilter')) { routeFilter = null; render(); return; }
+  if (e.target.closest('#close')) { openTrace = null; renderDetail(); render(); return; }
+  const s = e.target.closest('[data-span]');
+  if (s) { const box = $('#span-' + s.dataset.span); box.hidden = !box.hidden; s.setAttribute('aria-expanded', String(!box.hidden)); }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && openTrace) { openTrace = null; renderDetail(); render(); } });
+document.addEventListener('change', (e) => { if (e.target.id === 'snap-pick') { compareTo = e.target.value; render(); } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'snap-name') $('#snap-save').click(); });
+$('#clear').addEventListener('click', async () => { await api('/api/clear', { method: 'POST' }); openTrace = null; lastTotal = -1; renderDetail(); poll(); });
+
+async function poll() {
+  try {
+    const res = await api('/api/state');
+    state = await res.json();
+    if (state.received !== lastTotal) { lastTotal = state.received; render(); }
+  } catch {
+    $('#live-text').textContent = 'backlens stopped';
+    $('#live').classList.add('idle');
+  }
+}
+async function loadConfig() {
+  try { const res = await api('/api/config'); if (res.ok) cfg = await res.json(); } catch {}
+}
+async function pollApp() {
+  if (!cfg) return;
+  try {
+    const res = await api('/api/app?since=' + appSeq);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.lines.length) { appSeq = data.lines[data.lines.length - 1].seq; appendLines($('#logs-body'), data.lines); }
+    if (data.seq < appSeq) { appSeq = 0; $('#logs-body').textContent = ''; }
+    appInfo = data;
+    renderApp();
+  } catch {}
+}
+async function pollTests(force) {
+  if (!cfg || cfg.manual || !cfg.config || !cfg.config.test) return;
+  if (!force && tab !== 'tests' && !(testInfo && testInfo.status === 'running')) return;
+  try {
+    const res = await api('/api/tests?since=' + testSeq);
+    if (!res.ok) return;
+    const data = await res.json();
+    const prev = testInfo;
+    if (data.lines.length) { testSeq = data.lines[data.lines.length - 1].seq; testLines.push(...data.lines); }
+    testInfo = data;
+    // Re-render when the run starts, ends or gets its report; otherwise just append output.
+    const shapeChanged = !prev || prev.status !== data.status || Boolean(prev.report) !== Boolean(data.report);
+    if (shapeChanged || tab !== 'tests') { if (shapeChanged) render(); return; }
+    const out = $('#test-out');
+    if (out) appendLines(out, data.lines);
+    else if (data.lines.length) render();
+  } catch {}
+}
+
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'setup-form') return;
+  e.preventDefault();
+  const f = new FormData(e.target);
+  setupError = '';
+  const res = await api('/api/config', { method: 'POST', body: JSON.stringify({ app: f.get('app'), test: f.get('test') || null, autoRestart: f.get('auto') === 'on' }) });
+  if (!res.ok) { setupError = (await res.json()).error || 'Could not save.'; render(); return; }
+  showSetup = false;
+  const ai = f.get('ai');
+  if (ai) {
+    try { await aiPost('/api/ai/settings', { provider: ai }); } catch {}
+  }
+  await loadConfig();
+  testInfo = null;
+  render();
+  pollApp();
+  // Open the AI settings when the chosen helper still needs a step (Ollama, a model, a key).
+  if (ai) {
+    try {
+      const st = await (await api('/api/ai/status')).json();
+      const ready = ai === 'ollama' ? st.ollama.running && st.ollama.models.includes(st.settings.ollamaModel) : st.anthropic.configured;
+      if (!ready) { aiNotice = ''; $('#aiset').hidden = false; renderAISettings(); }
+    } catch {}
+  }
+});
+document.addEventListener('submit', (e) => {
+  if (e.target.id !== 'aiset-form') return;
+  e.preventDefault();
+  if (document.activeElement && document.activeElement.id === 'ai-key') $('#ai-key-save').click();
+});
+document.addEventListener('click', async (e) => {
+  if (e.target.closest('#setup-open') || e.target.closest('#setup-open-2')) { showSetup = true; render(); return; }
+  if (e.target.closest('#setup-cancel')) { showSetup = false; render(); return; }
+  if (e.target.closest('#app-restart')) { $('#app-meta').textContent = 'restarting…'; await api('/api/app/restart', { method: 'POST' }); pollApp(); return; }
+  if (e.target.closest('#app-toggle')) { const stop = appInfo && appInfo.pid; $('#app-meta').textContent = stop ? 'stopping…' : 'starting…'; await api(stop ? '/api/app/stop' : '/api/app/start', { method: 'POST' }); pollApp(); return; }
+  if (e.target.closest('#logs-toggle') || e.target.closest('#logs-close')) {
+    logsOpen = !logsOpen;
+    $('#logs').hidden = !logsOpen;
+    document.body.classList.toggle('has-logs', logsOpen);
+    $('#logs-toggle').setAttribute('aria-expanded', String(logsOpen));
+    if (logsOpen) { const el = $('#logs-body'); el.scrollTop = el.scrollHeight; }
+    return;
+  }
+  if (e.target.closest('#tests-run')) {
+    testError = '';
+    const res = await api('/api/tests/run', { method: 'POST' });
+    if (!res.ok) testError = (await res.json()).error || 'Could not start the tests.';
+    testLines = []; testSeq = 0; if (testInfo) testInfo.report = null;
+    render(); pollTests(true);
+    return;
+  }
+  const acc = e.target.closest('[data-accept]');
+  if (acc) {
+    const res = await api('/api/baseline', { method: 'POST', body: JSON.stringify({ keys: JSON.parse(acc.dataset.accept) }) });
+    if (res.ok) { testInfo.report = (await res.json()).report; render(); }
+    return;
+  }
+  const copy = e.target.closest('[data-copy]');
+  if (copy) { navigator.clipboard.writeText(copy.dataset.copy).then(() => { copy.textContent = 'Copied'; setTimeout(() => (copy.textContent = 'Copy SQL'), 1500); }); }
+});
+document.addEventListener('change', (e) => {
+  if (e.target.id !== 'editor-pick') return;
+  editor = e.target.value;
+  try { localStorage.setItem('backlens-editor', editor); } catch {}
+  render();
+  if (openTrace) renderDetail();
+});
+document.addEventListener('click', (e) => {
+  const n = e.target.closest('#map [data-node]');
+  if (n) { mapSel = mapSel === n.dataset.node ? null : n.dataset.node; $('#map-side').innerHTML = renderMapSide(); drawWires(); return; }
+  const g = e.target.closest('[data-goto]');
+  if (g) { tab = g.dataset.goto; render(); return; }
+  const rr = e.target.closest('[data-route-requests]');
+  if (rr) { routeFilter = rr.dataset.routeRequests; tab = 'requests'; render(); return; }
+  if (tab === 'map' && mapSel && e.target.closest('#map') && !e.target.closest('[data-node]')) { mapSel = null; $('#map-side').innerHTML = renderMapSide(); drawWires(); }
+});
+document.addEventListener('mouseover', (e) => {
+  if (tab !== 'map' || mapSel) return;
+  const n = e.target.closest('#map [data-node]');
+  const id = n ? n.dataset.node : null;
+  if (id !== mapHover) { mapHover = id; drawWires(); }
+});
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-copy-path]');
+  if (!b) return;
+  navigator.clipboard.writeText(b.dataset.copyPath).then(() => { const t = b.textContent; b.textContent = 'copied'; setTimeout(() => (b.textContent = t), 1200); });
+});
+document.addEventListener('change', async (e) => {
+  if (e.target.id !== 'auto' || !cfg || !cfg.config) return;
+  await api('/api/config', { method: 'POST', body: JSON.stringify({ ...cfg.config, autoRestart: e.target.checked }) });
+  await loadConfig();
+  pollApp();
+});
+
+(async () => {
+  if (!TOKEN) {
+    document.querySelector('main').innerHTML = '<div class="gate"><b>Open the link from your terminal</b>backlens prints a private link when it starts, like http://localhost:7777/?t=… . It keeps other websites from controlling your app.</div>';
+    return;
+  }
+  const check = await api('/api/config').catch(() => null);
+  if (!check || check.status === 401) {
+    document.querySelector('main').innerHTML = '<div class="gate"><b>This link is from an earlier session</b>backlens makes a new private link each time it starts. Open the one in your terminal now.</div>';
+    return;
+  }
+  cfg = await check.json();
+  $('#editor-pick').innerHTML = Object.entries(EDITORS).map(([k, e]) => `<option value="${k}" ${k === editor ? 'selected' : ''}>${e.name}</option>`).join('');
+  render();
+  poll(); pollApp(); pollTests(true);
+  setInterval(poll, 1000);
+  setInterval(pollApp, 1000);
+  setInterval(pollTests, 1000);
+})();
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { judge, stableKey } from '../report.js';
+import { judge, stableKey } from '../src/report/index.js';
 
 const via = (line) => [{ fn: 'f', file: 'src/a.ts', line }, { fn: 'g', file: 'src/b.ts', line: line + 1 }];
 const repeated = (lineA, lineB) => ({

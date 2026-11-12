@@ -6,8 +6,8 @@ import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findSessions } from '../mcp.js';
-import { startServer } from '../server.js';
+import { findSessions } from '../src/mcp/session.js';
+import { startServer } from '../src/dashboard/server.js';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'backlens.js');
 const TOKEN = 'a'.repeat(32);
@@ -70,6 +70,10 @@ test('an editor can list issues and read a request through backlens mcp, without
     const { tools } = (await mcp.rpc('tools/list', {})).result;
     assert.ok(tools.some((t) => t.name === 'measure_request'));
     assert.ok(tools.some((t) => t.name === 'usage'));
+
+    const status = (await mcp.tool('status')).content[0].text;
+    assert.match(status, /versions: recorder (\S+), MCP server \1$/m, 'both versions shown');
+    assert.ok(!/mismatch/.test(status), 'same install, no warning');
 
     const issues = await mcp.tool('list_issues');
     assert.ok(!issues.isError, issues.content[0].text);

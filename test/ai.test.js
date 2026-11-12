@@ -3,8 +3,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { buildContext, enclosing, insideProject, scrub } from '../ai/context.js';
-import { costUsd, route } from '../ai/router.js';
+import { buildContext, enclosing, insideProject, scrub } from '../src/ai/context.js';
+import { costUsd, route } from '../src/ai/router.js';
 
 const issue = (over = {}) => ({ type: 'repeat', title: 'The same call is made twice in one request', route: 'GET /a', sites: ['src/a.ts:10', 'src/a.ts:20'], sql: 'select 1', fix: 'reuse', frames: [], ...over });
 const ctx = { tokens: 4000, files: [] };
@@ -79,7 +79,7 @@ test('context reads the function around each recorded site, with line numbers', 
 });
 
 test('model code is cleaned of fences and copied line numbers', async () => {
-  const { cleanCode } = await import('../ai/fixes.js');
+  const { cleanCode } = await import('../src/ai/index.js');
   assert.equal(cleanCode('```ts\n   74  const a = 1;\n   75  return a;   \n```'), 'const a = 1;\nreturn a;');
   assert.equal(cleanCode('  if (x) {\n    y();\n  }'), '  if (x) {\n    y();\n  }');
 });
@@ -88,7 +88,7 @@ test('a find that ends mid-line keeps the rest of the line', async () => {
   const { mkdtempSync, writeFileSync, readFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  const { createAI } = await import('../ai/fixes.js');
+  const { createAI } = await import('../src/ai/index.js');
   const root = mkdtempSync(join(tmpdir(), 'bl-'));
   writeFileSync(join(root, 'a.ts'), ['class S {', '  send() {', '    return this.mine(id);', '  }', '', '  async remove(id: string) {', '  }', '}'].join('\n'));
   const issue = { key: 'k', type: 'repeat', title: 't', route: 'GET /', sites: ['a.ts:3'], sql: '', fix: '', frames: [], example: 'x', seen: 1, of: 1, cost: 1 };
@@ -112,7 +112,7 @@ test('an edit numbered after an earlier edit is caught and the original lines ar
   const { mkdtempSync, writeFileSync, mkdirSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  const { createAI } = await import('../ai/fixes.js');
+  const { createAI } = await import('../src/ai/index.js');
   const root = mkdtempSync(join(tmpdir(), 'bl-'));
   const body = ['async function wall() {', '  const a = await one();', '  for (const x of a) {', '    await two(x);', '  }', '  return {', '    total: a.length,', '    items: a,', '  };', '}', ''];
   writeFileSync(join(root, 'a.ts'), body.join('\n'));
@@ -139,7 +139,7 @@ test('a fix applies to a file with uncommitted changes, and revert never overwri
   const { execFileSync } = await import('node:child_process');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  const { createAI } = await import('../ai/fixes.js');
+  const { createAI } = await import('../src/ai/index.js');
   const root = mkdtempSync(join(tmpdir(), 'bl-'));
   const git = (...a) => execFileSync('git', ['-C', root, ...a], { stdio: 'ignore' });
   git('init', '-q');

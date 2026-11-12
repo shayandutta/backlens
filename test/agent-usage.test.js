@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentUsage, usageCost, usageText } from '../agent-usage.js';
+import { agentUsage, usageCost, usageText } from '../src/agent-usage/index.js';
 
 const at = (s) => new Date(Date.now() - 3600e3 + s * 1000).toISOString();
 const assistant = (id, s, content, usage) => ({ type: 'assistant', sessionId: 'S', timestamp: at(s), message: { id, model: 'claude-opus-5-5', content, usage } });

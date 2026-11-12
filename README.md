@@ -71,29 +71,33 @@ Set up in **AI settings**, entirely from the dashboard.
 Let Claude Code, Cursor or any MCP client see what your requests do, change the code, and check the change on the same request.
 
 ```
-claude mcp add backlens -- npx -y backlens mcp
+claude mcp add backlens -- npx -y backlens@latest mcp
 ```
 
 Cursor (`.cursor/mcp.json`) and others:
 
 ```json
-{ "mcpServers": { "backlens": { "command": "npx", "args": ["-y", "backlens", "mcp", "--root", "${workspaceFolder}"] } } }
+{ "mcpServers": { "backlens": { "command": "npx", "args": ["-y", "backlens@latest", "mcp", "--root", "${workspaceFolder}"] } } }
 ```
 
-Keep `npx backlens` running in the server folder; the MCP server reads that session (it finds it in the project, a folder above, or a few below, like `apps/api`). Tools:
+Keep `npx backlens@latest` running in the server folder; the MCP server reads that session (it finds it in the project, a folder above, or a few below, like `apps/api`). `@latest` matters: without it, `npx` keeps reusing whatever version it cached first, and the dashboard and the MCP server can drift apart. `status` shows both versions and says when they differ. Tools:
 
 | Tool | What the agent gets |
 |---|---|
-| `status` | is backlens recording, is the app up, traffic and issue counts |
+| `status` | is backlens recording, is the app up, traffic and issue counts, recorder and MCP versions |
 | `list_issues` | issues worst first, with route, `file:line`, statements, a suggested fix and an example request |
 | `list_routes`, `list_requests` | p50, p95, calls per request; recent requests with ids |
 | `get_request` | the waterfall of one request: each query, Redis and HTTP call, its time and the code behind it |
-| `measure_request` | replays a recorded GET against the code as it is now (warm-up, then median of runs) and compares it with what was recorded |
-| `measure_url` | the same for a path sent as a plain GET (no cookies): public routes, or a before when nothing is recorded yet |
+| `measure_request` | replays a recorded GET against the code as it is now (warm-up, then median and p25-p75 of runs); measure before and after a change and it compares warm against warm, saying "within noise" when the runs overlap |
+| `measure_url` | the same for a path sent as a plain GET (no cookies): public routes, or when nothing is recorded yet |
 | `app_logs`, `restart_app`, `run_tests` | the app's output, a restart, the test script with its issues |
+| `diff` | what the change did to the whole app: one recorded read per route replayed and compared with a baseline (status, response fields and types, queries, calls, errors, new issues). ✗ broken, ~ changed, ↑ better; silent when nothing changed |
+| `accept` | take intended changes into that baseline |
+| `save_login` | save how to sign in as a role (from a recorded sign-in), so `as: "admin"` works everywhere |
+| `report` | Markdown evidence for a pull request: breaks caught, changes accepted, measured before → after |
 | `usage` | what the work cost: tokens and dollars for this prompt, the session and the last 30 days |
 
-A typical loop: *list_issues → get_request → measure (before) → edit → measure again → run_tests*. On a sample N+1 that went from 6 queries and 6.7 ms to 2 queries and 1.6 ms, checked by replay. Writes are never replayed, and parameter values never reach the agent.
+A typical loop: *list_issues → get_request → measure (before) → edit → measure again → run_tests → diff*. On a sample N+1 that went from 6 queries and 6.7 ms to 2 queries and 1.6 ms, checked by replay. Writes are never replayed, and parameter values never reach the agent.
 
 ### What it costs
 
@@ -123,6 +127,71 @@ backlens handed the agent 5k tokens instead of up to 40k of source: 88% less to 
 ```
 
 The "without backlens" figure is an estimate: the size of the app's source an agent would have to search, against what backlens gave it. Reading code also can't count queries or time them, so it can't prove a fix.
+
+### What did my change break? (`diff`)
+
+Tests cover what someone thought to test. `diff` covers every route the app has served: it keeps one read per route (up to 30), and after a change replays each and compares it with the baseline.
+
+A real run on a NestJS API, after a change that dropped a field from one response:
+
+```
+$ npx backlens diff
+1 broken: 17 routes checked in 0.5 s.
+
+GET /v1/auth/me
+  ✗ response lost $.email
+
+✗ items are breaks: fix them, or if the change is intended, accept those routes.
+```
+
+- The first run takes the baseline. `backlens accept [route...]` (or the `accept` tool) takes an intended change in.
+- Exit code 1 when something broke, so it can gate a hook or a script.
+- **Compared:** status, the response's fields and types (never values), queries, Redis and outgoing calls, failing calls, and new N+1 or repeated calls.
+- **Data drift is not a change:** a list empty this time, a field null this time.
+- **Time is off by default.** Right after a code change, a dev watcher that is still compiling makes timings noisy. `--time` adds a coarse check (more than 2× and 10 ms, confirmed by a re-run); `measure_request` is the precise tool.
+- **The baseline** is `.backlens/behavior.json`, readable by you only: routes, paths and fingerprints, with no headers, cookies or values. Signed-in routes are replayed with the request backlens holds in memory, so after restarting backlens, use such a page once before diffing it.
+
+### Signed-in routes, without handing over passwords
+
+Sign in once in the app, then have the agent save that sign-in as a role:
+
+```
+save_login { name: "admin", id: "<the POST /login request>" }
+measure_url { url: "/v1/admin/users", as: "admin" }
+```
+
+- **Profile file:** `.backlens/profiles.json`, readable by you only. It stores `${env:SEED_ADMIN_PASSWORD}`-style references to your `.env`, never the password itself. A password that is in no `.env` file stays in memory for that session only.
+- **Who sees the token:** backlens signs in itself and swaps the token into replays. The agent never sees the token or the password.
+- **`diff`:** uses the profile for signed-in routes, even after backlens restarts.
+
+### Replaying writes, rolled back
+
+`measure_request { id, sandbox: true }` replays a recorded POST, PUT or DELETE.
+
+- **What gets undone:** every Postgres query of the request runs in one transaction that is rolled back when the response is done. The app's own `BEGIN`/`COMMIT` become savepoints, so nothing commits.
+- **What it refuses:** a request that called out over HTTP, and database calls that don't go through `pg`.
+- **What it reports:** Redis writes, which are not undone, and any query that escaped the transaction.
+
+### The gate: `backlens init claude` (or `codex`, `cursor`)
+
+```
+npx backlens init claude
+```
+
+- **What it adds:** the MCP server, plus a stop hook. When the agent finishes a turn that changed files, the hook runs `diff`.
+- **On a break:** the agent is sent back once with the reason (`✗ GET /v1/me/orders answers 500`).
+- **On other changes:** they are noted and accepted.
+- **When nothing changed:** it says nothing.
+- **When backlens is not running:** it does nothing.
+- **Undo:** `--uninstall`.
+
+### Evidence for the PR
+
+```
+npx backlens report > evidence.md
+```
+
+Every diff, measurement and hook decision is logged to `.backlens/evidence.jsonl` as it runs. The report turns that log into the last check, the breaks caught on the way, the changes accepted and a measured before → after table.
 
 ## In CI: fail the build on new issues
 
@@ -189,7 +258,7 @@ Redis passwords never show: `AUTH`, `HELLO` and similar commands are recorded by
 - **It runs only scripts from your `package.json`,** by name.
 - **Files change only when you click Apply,** with a copy kept first. Revert never overwrites edits you made afterwards.
 - **AI sees only what the preview shows.** Secret-looking values are masked; `.env` and `node_modules` are never read.
-- **Replaying writes is off by default,** since it changes your dev database again.
+- **Replaying writes is off by default,** since it changes your dev database again. `diff` replays reads only.
 - **Agent costs come from counts only.** The Agents tab and `usage` read token counts and tool names from Claude Code's logs on your machine; prompts, code and replies are skipped. `backlens statusline` keeps only your plan's two limit percentages.
 - **Indexes are built from checked table and column names** through your app's own connection: backlens never sees a database password.
 
@@ -199,14 +268,15 @@ Redis passwords never show: `AUTH`, `HELLO` and similar commands are recorded by
 
 - times each request on Node's own HTTP server, so any framework on top of it works;
 - wraps `pg`, Prisma, `ioredis`, node-redis, `fetch` and outgoing `http`/`https`, and records the line of your code behind each call, through V8's async stack traces for ORMs like drizzle and through source maps for bundled code;
-- asks Postgres for each distinct SELECT's plan with `EXPLAIN (GENERIC_PLAN)` (Postgres 16+), which never runs the query, and flags full-table reads no index covers.
+- asks Postgres for each distinct SELECT's plan with `EXPLAIN (GENERIC_PLAN)` (Postgres 16+), which never runs the query, and flags full-table reads no index covers, on tables of 1,000 rows or more (a full read of a smaller table is what Postgres should do). Filters on columns with only a few values, like a status, are shown as hints.
 
 ## Limits
 
 - The "wait for each other" hint skips calls that use an earlier call's result, but it cannot see every dependency: read it as a question, not a verdict.
 - The index advisor needs Postgres 16+ and looks at equality filters and the sort above them. With Prisma it needs a `pg` driver adapter (the default in Prisma 7).
 - Prisma on its Rust engine (5 and 6) is read through Prisma's tracing hook. If your app sets up `@prisma/instrumentation` itself, yours takes precedence and backlens sees only Prisma 7 or adapter queries.
-- Timings on a dev machine are rough; query counts are exact.
+- Timings on a dev machine are rough; query counts are exact. `measure_request` restarts the app first so before and after are both measured on a fresh run (~7 s on a NestJS dev server).
+- `diff` checks reads (GET) only, one request per route; a route the app has not served is not checked.
 
 ## Develop
 
