@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased (0.7)
+
+- **Compatibility matrix:** `npm run test:compat`, also run in CI. The recorder runs against real pg (8.11 and the latest 8), drizzle-orm, Kysely, ioredis 5, node-redis 4 and 5, Express 4 and 5, and Fastify 4 and 5, on real Postgres and Redis. Each call must be recorded once, in its request, with the app's code line. It fails on 0.6.0's double count.
+- **Value hashes are keyed per app process (HMAC-SHA-256)**, so a likely value (an email, a small id) can't be matched to its hash.
+- **Reads that write:**
+  - `diff` no longer replays a GET that changed data when it was recorded (SQL writes or outgoing non-GET calls), and says why.
+  - It reports `now writes when read: …` when a change makes a read start writing.
+  - `measure` warns when a replayed read changed data.
+  - Redis writes from a read (cache fills, rate limits) only get a note.
+  - Writes nearly every request makes are treated as infrastructure and ignored.
+
 ## 0.6.1
 
 - **Fixed: a query recorded twice.** After a transaction, a plain `pool.query` in the same request could be recorded twice, the second copy with no code location. pg-pool reuses the client and replaces its `release()`, so the transaction's lease was never cleared. This showed up as a false "same call twice" issue, seen on a real NestJS/drizzle app.

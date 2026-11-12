@@ -1,4 +1,4 @@
-import { checkTrace, routeOf } from '../../analysis/index.js';
+import { ambientWrites, checkTrace, dataWrites, ownWrites, routeOf } from '../../analysis/index.js';
 import { REPLAY, SAFE_METHODS } from '../../shared/replay-policy.js';
 import { compareTimings, timing } from '../../shared/compare.js';
 import { asRole } from '../../access/login.js';
@@ -102,12 +102,18 @@ export default function measureRoutes({ root, store, replayer, fresh, ai, access
         const listed = store.summary().issues.filter((i) => i.route === route && i.type !== 'index');
         const gone = listed.filter((i) => ![...seen.values()].some((x) => x.type === i.type && x.sql === i.sql));
         if (gone.length) store.markFixed(gone[0].key, last);
+        // A read that changed data while it was replayed: every run changed it again.
+        const ambient = ambientWrites(store.traces);
+        const writes = sandbox ? [] : dataWrites(last, ambient);
+        const redisWrites = sandbox ? [] : ownWrites(last, ambient).filter((w) => w.startsWith('redis '));
         const brief = (x) => x && { ms: x.ms, lo: x.lo, hi: x.hi, runs: x.runs, status: x.status, queries: x.queries, redis: x.redis, http: x.http };
         record(root, 'measure', { route, as, previous: brief(previous), now: brief(now), change: compareTimings(previous, now), issues: seen.size });
         return json(res, 200, {
           route,
           as,
           sandbox,
+          writes,
+          redisWrites,
           recorded: recorded.length ? describe(recorded, recorded.at(-1)) : null,
           previous,
           now,

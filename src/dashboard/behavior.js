@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asRole } from '../access/login.js';
-import { routeOf } from '../analysis/index.js';
+import { ambientWrites, dataWrites, routeOf } from '../analysis/index.js';
 import { compareFingerprints, RANK } from '../diff/compare.js';
 import { fingerprint } from '../diff/fingerprint.js';
 import { record } from '../evidence/ledger.js';
@@ -60,10 +60,16 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
     chmodSync(file, 0o600);
   }
 
-  /** The newest replayable read per route, most-called routes first. */
+  /**
+   * The newest replayable read per route, most-called routes first. A GET that changed data when
+   * it was recorded (beyond what every request does, like a rate limiter) is never replayed: such
+   * routes are returned in `writing` with what they wrote.
+   */
   function candidates() {
     const calls = new Map();
     const newest = new Map();
+    const writing = new Map();
+    const ambient = ambientWrites(store.traces);
     for (let i = store.traces.length - 1; i >= 0; i--) {
       const t = store.traces[i];
       const route = routeOf(t.method, t.url, t.template);
@@ -71,9 +77,16 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
       if (newest.has(route) || t.status >= 500) continue;
       const payload = store.replays.get(t.id);
       if (!payload || !payload.url || !SAFE_METHODS.includes(payload.method)) continue;
+      const writes = dataWrites(t, ambient);
+      if (writes.length) {
+        if (!writing.has(route)) writing.set(route, writes);
+        continue;
+      }
       newest.set(route, { route, payload });
     }
-    return [...newest.values()].sort((a, b) => calls.get(b.route) - calls.get(a.route) || a.route.localeCompare(b.route)).slice(0, MAX_ROUTES);
+    for (const r of newest.keys()) writing.delete(r);
+    const list = [...newest.values()].sort((a, b) => calls.get(b.route) - calls.get(a.route) || a.route.localeCompare(b.route)).slice(0, MAX_ROUTES);
+    return Object.assign(list, { writing });
   }
 
   /** The request to send for a baseline entry, or null if it needs a fresh recording. */
@@ -108,15 +121,17 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
   async function capture(routes = null) {
     const started = Date.now();
     const old = load();
-    const picked = candidates().filter((c) => !routes || routes.includes(c.route));
+    const all = candidates();
+    const picked = all.filter((c) => !routes || routes.includes(c.route));
     // Accepting a route already in the baseline: its last request, even if traffic moved on.
     if (routes && old) for (const e of old.entries) if (routes.includes(e.route) && !picked.some((c) => c.route === e.route) && payloadFor(e)) picked.push({ route: e.route, payload: payloadFor(e) });
     if (!picked.length) return { entries: old ? old.entries.length : 0, captured: [], skipped: [], ms: 0, error: 'No replayable reads recorded yet. Use the app (open its pages) so backlens has requests to replay.' };
     const { port, restarted, run } = await fresh.freshRun({ maxRequests: 0 });
     if (!port) return { error: 'The app did not start. Check app_logs.' };
     const captured = [];
-    const skipped = [];
+    const skipped = [...all.writing].filter(([r]) => !routes || routes.includes(r)).map(([route, w]) => ({ route, why: `it changes data when requested (${w.slice(0, 2).join(', ')}), so it is not replayed` }));
     const entries = new Map((old ? old.entries : []).map((e) => [e.route, e]));
+    const ambient = new Set([...ambientWrites(store.traces), ...((old && old.ambient) || [])]);
     for (const c of picked) {
       const r = await replay(c.payload, port);
       if (r.skip) {
@@ -138,14 +153,16 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
         url: safe.url,
         authed: safe.secret || AUTH_HEADERS.some((h) => c.payload.headers && h in c.payload.headers),
         as: access ? access.sessions.roleOf(c.payload.headers) : null,
-        fingerprint: fingerprint(r.traces),
+        fingerprint: fingerprint(r.traces, ambient),
         at: Date.now(),
       });
       captured.push(c.route);
     }
     fresh.markUsed(run);
     const list = [...entries.values()].slice(0, MAX_ROUTES);
-    save({ version: 1, at: Date.now(), entries: list });
+    // Writes every request makes (a rate limiter): kept, so a later diff with no traffic to judge
+    // from still knows them.
+    save({ version: 1, at: Date.now(), entries: list, ambient: [...ambient] });
     record(root, routes ? 'accept' : 'baseline', { routes: captured, skipped: skipped.length });
     return { entries: list.length, captured, skipped, restarted, ms: Date.now() - started };
   }
@@ -167,6 +184,7 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
     const skipped = [];
     const checked = [];
     const signedIn = new Set();
+    const ambient = new Set([...ambientWrites(store.traces), ...(baseline.ambient || [])]);
     for (const e of entries) {
       let payload = payloadFor(e);
       // A route taken as a role is always sent as that role; a signed-in route whose request is
@@ -212,7 +230,7 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
         continue;
       }
       payloads.set(e.route, payload);
-      const now = fingerprint(r.traces);
+      const now = fingerprint(r.traces, ambient);
       lastSeen.set(e.route, { fingerprint: now, at: Date.now() });
       const findings = compareFingerprints(e.fingerprint, now);
       checked.push({ e, payload, findings: time ? findings : findings.filter((f) => !f.time) });
@@ -227,9 +245,9 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
     } else {
       for (const c of timed) {
         const again = await replay(c.payload, port);
-        const confirmed = again.traces ? compareFingerprints(c.e.fingerprint, fingerprint(again.traces)).filter((f) => f.time) : [];
+        const confirmed = again.traces ? compareFingerprints(c.e.fingerprint, fingerprint(again.traces, ambient)).filter((f) => f.time) : [];
         c.findings = [...c.findings.filter((f) => !f.time), ...confirmed];
-        if (again.traces) lastSeen.set(c.e.route, { fingerprint: fingerprint(again.traces), at: Date.now() });
+        if (again.traces) lastSeen.set(c.e.route, { fingerprint: fingerprint(again.traces, ambient), at: Date.now() });
       }
     }
     for (const c of checked) if (c.findings.length) results.push({ route: c.e.route, findings: c.findings.sort((a, b) => RANK[a.kind] - RANK[b.kind]).map(({ kind, what }) => ({ kind, what })) });

@@ -87,6 +87,11 @@ export function compareFingerprints(before, after) {
   const newErrors = after.errors.filter((e) => !before.errors.includes(e));
   if (newErrors.length) add('broken', `new failing call: ${list(newErrors, 2)}`);
 
+  // A read that starts changing data is a behavior change worth knowing about, whatever its intent.
+  // A baseline from before 0.7 has no writes recorded: nothing to compare against.
+  const newWrites = before.writes ? (after.writes || []).filter((w) => !before.writes.includes(w)) : [];
+  if (newWrites.length) add('changed', `now writes when read: ${list(newWrites, 2)}`);
+
   const q0 = sum(before.queries);
   const q1 = sum(after.queries);
   const newStatements = Object.keys(after.queries).filter((k) => !(k in before.queries));

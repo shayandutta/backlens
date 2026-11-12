@@ -52,8 +52,9 @@ test('a lost field is broken; an extra query is a change; one fewer is better', 
 
 test('a new failing call and a new outgoing host are reported', () => {
   const f = compareFingerprints(base(), fp(200, [span('db', 'select * from a where id = $1', { error: true }), span('redis', 'GET k'), span('http', 'POST https://api.stripe.com/v1/charges')], { id: 1, name: 'x' }));
-  assert.deepEqual(f.map((x) => x.kind), ['broken', 'changed']);
-  assert.match(f[1].what, /new outgoing call to api\.stripe\.com/);
+  assert.deepEqual(f.map((x) => x.kind), ['broken', 'changed', 'changed']);
+  assert.match(f[1].what, /now writes when read: http POST api\.stripe\.com/, 'a POST from a read is a write');
+  assert.match(f[2].what, /new outgoing call to api\.stripe\.com/);
 });
 
 test('time counts only past 100% and 10 ms with every run beyond every baseline run', () => {

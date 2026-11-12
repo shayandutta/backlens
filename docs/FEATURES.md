@@ -21,7 +21,7 @@ problems seen in real use (see WORKLOG.md), not wishes.
 | Replay payload | method, url, headers and body (≤ 64 KB) kept in dashboard memory only, for replays |
 | Index advisor | `EXPLAIN (GENERIC_PLAN)` on each distinct SELECT (Postgres 16+, never runs the query); flags sequential scans filtered on columns no index starts with, including the ORDER BY columns worth adding; sends the table's row estimate and each filter column's `n_distinct` from `pg_stats` |
 | Index create / drop | from the dashboard, through the app's own pool, from checked identifiers only; checks the plan can use it |
-| Privacy | values hashed; emails, IPs, UUIDs and long numbers masked in Redis keys; `AUTH`/`HELLO`/`ACL`/`CONFIG`/`MIGRATE` shown by name only |
+| Privacy | values hashed with a key made fresh per app process (HMAC-SHA-256); emails, IPs, UUIDs and long numbers masked in Redis keys; `AUTH`/`HELLO`/`ACL`/`CONFIG`/`MIGRATE` shown by name only |
 | Safety | off unless started by backlens; installed once; every patch swallows its own errors; framework assets (`/_next/`, Vite, favicons, source maps) ignored |
 
 ## 2. Analysis (pure)
@@ -103,6 +103,7 @@ run) and `backlens accept [route...]`, API `POST /api/behavior/diff|accept`, `GE
 | ✗ broken | 2xx/3xx → 4xx or 5xx; a field removed; a field's type changed; a new failing call |
 | ~ changed | more queries or a new statement; more Redis or outgoing calls; a new outgoing host; a new perf issue; a new field; slower (only with `--time`) |
 | ↑ better | fewer queries or calls; an issue gone; 4xx/5xx → 2xx; faster (only with `--time`) |
+| Reads that write | a GET that changed data when recorded (SQL writes, outgoing non-GET calls) is never replayed and is listed as skipped; a read that starts writing after a change is `~ now writes when read`; Redis writes from reads (caches, rate limits) do not count; writes nearly every request makes (≥ 80% of reads, ≥ 2 routes) are infrastructure, saved with the baseline |
 | Noise rules | an empty array or a null value hides its subtree (data drift); null ↔ type is not a type change; a status class change skips the other comparisons; time is opt-in, needs more than 2× and 10 ms with every run past every baseline run, is re-run to confirm, and is dropped when a third of the routes move together |
 
 ## 5c. Access broker (login profiles)

@@ -5,6 +5,27 @@ Numbers come from real runs; say so when something was not measured.
 
 ---
 
+## 2026-11-13: 0.7 started, trust before features (branch `v0.7/compat-matrix`)
+
+### Done
+
+- **Compatibility matrix** (`test/compat/`, `npm run test:compat`, CI job with Postgres 16 and Redis 7).
+  - Libraries: pg 8.11 and the latest 8, drizzle, Kysely, ioredis 5, node-redis 4 and 5, Express 4 and 5, Fastify 4 and 5.
+  - Each scenario checks every call is recorded once, in its request, with an app line. Postgres scenarios: a plain query, two transactions then a pooled query, the callback API, an error, parallel queries.
+  - Against 0.6.0's pg adapter it fails on pg 8.11, pg 8 and drizzle, which is the double count. Kysely is unaffected.
+- **Salted hashes:** HMAC-SHA-256 with a key per app process. Before, plain SHA-1 let anyone match a guessed email or id to its hash.
+- **Reads that write:** see FEATURES 5b. It is checked on oldmonk:
+  - The first heuristic wrongly excluded 3 of 17 routes: per-route rate-limit keys (`rl:route:*`) and a cache `SET`.
+  - Now Redis writes from reads only get a note, and SQL or outgoing writes exclude a route.
+  - Result on oldmonk: 17/17 routes in the baseline, a clean diff, and `measure` notes the rate limiter.
+- 97 tests pass; the matrix passes (11 cases).
+
+### Next in 0.7
+
+`backlens doctor` (2), confidence labels (5), caller chains (6), BullMQ (7), "local replay" labels (8), 0.6 leftovers (9).
+
+---
+
 ## 2026-11-12 (night): 0.6.1, two bugs found by the first real use
 
 An agent ran 0.6.0 on a real app ("find and fix performance issues"):

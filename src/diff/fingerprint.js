@@ -1,4 +1,4 @@
-import { checkTrace, normalizeSql } from '../analysis/index.js';
+import { checkTrace, dataWrites, normalizeSql } from '../analysis/index.js';
 import { timing } from '../shared/compare.js';
 
 /**
@@ -20,8 +20,11 @@ const hostOf = (name) => {
 
 const at = (f) => (f ? `${f.file}:${f.line}` : 'unknown');
 
-/** Fingerprint of a request from its replayed traces (all with the same status). */
-export function fingerprint(traces) {
+/**
+ * Fingerprint of a request from its replayed traces (all with the same status). `ambient`: writes
+ * every request makes (a rate limiter), left out of `writes`.
+ */
+export function fingerprint(traces, ambient = new Set()) {
   const last = traces.at(-1);
   const spans = last.spans || [];
   return {
@@ -32,6 +35,7 @@ export function fingerprint(traces) {
     http: countBy(spans.filter((s) => s.kind === 'http').map((s) => hostOf(s.name))),
     errors: [...new Set(spans.filter((s) => s.error).map((s) => `${s.kind} ${normalizeSql(s.name).slice(0, 80)} at ${at((s.frames || [])[0])}`))],
     issues: [...new Set(checkTrace(last).map((i) => `${i.type}: ${i.title}`))],
+    writes: dataWrites(last, ambient),
     time: timing(traces.map((t) => t.duration)),
   };
 }

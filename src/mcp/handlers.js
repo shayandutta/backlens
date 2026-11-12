@@ -109,6 +109,8 @@ export async function call(name, args, cwd) {
       if (m.recorded) out.push(row('recorded traffic', m.recorded), '(recorded traffic includes cold requests, so it is not compared)');
       out.push('', 'First measurement of this request: saved. Change the code, then measure it again to compare warm against warm.');
     }
+    if (m.writes && m.writes.length) out.push('', `Warning: this ${m.trace.method} changed data each time it was replayed (${m.writes.slice(0, 3).join(', ')}). Replaying it again changes it again.`);
+    else if (m.redisWrites && m.redisWrites.length) out.push('', `It also wrote to Redis on each replay (${m.redisWrites.slice(0, 3).join(', ')}): usually a cache fill or rate limit.`);
     if (m.sandbox) {
       if (m.sandbox.contained) out.push('', `Sandbox: every run's ${m.sandbox.statements} Postgres statements were rolled back.${m.sandbox.redisWrites.length ? ` Not undone: Redis ${m.sandbox.redisWrites.join(', ')}.` : ''}`);
       else out.push('', `WARNING: the sandbox did not hold: ${m.sandbox.leaked ? `${m.sandbox.leaked} queries ran on a connection outside the transaction` : m.sandbox.error}. Writes may have reached the database.`);
