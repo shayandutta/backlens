@@ -37,6 +37,8 @@ export function createStore() {
     fixedAt,
     createdIndexes,
     measured,
+    // What the recorder in the running app hooked into (see recorder/adapters.cjs).
+    adapters: null,
     get received() {
       return received;
     },

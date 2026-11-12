@@ -7,17 +7,33 @@ const { patchPg } = require('./drivers/pg.cjs');
 const { patchPrisma } = require('./drivers/prisma.cjs');
 const { patchIoredis, patchRedisQueue } = require('./drivers/redis.cjs');
 const { wrapFastify } = require('./frameworks/fastify.cjs');
+const { foreign, note } = require('./adapters.cjs');
 
 function hookRequire() {
   const load = Module._load;
   Module._load = function (request) {
     const exported = load.apply(this, arguments);
     try {
-      if (request === 'pg') patchPg(exported);
-      else if (request === 'ioredis') patchIoredis(exported);
-      else if (request === 'fastify') return wrapFastify(exported);
-      else if (request.endsWith('/commands-queue')) patchRedisQueue(exported);
-      else if (exported && typeof exported.PrismaClient === 'function') patchPrisma(exported);
+      if (request === 'pg') {
+        const was = exported && exported.Client && exported.Client.prototype.query;
+        patchPg(exported);
+        note('pg', { pkg: 'pg', wrapped: foreign(was) });
+      } else if (request === 'ioredis') {
+        const was = exported && exported.prototype && exported.prototype.sendCommand;
+        patchIoredis(exported);
+        note('ioredis', { pkg: 'ioredis', wrapped: foreign(was) });
+      } else if (request === 'fastify') {
+        note('fastify', { pkg: 'fastify' });
+        return wrapFastify(exported);
+      } else if (request.endsWith('/commands-queue')) {
+        const Queue = exported && (exported.default || exported);
+        const was = Queue && Queue.prototype && Queue.prototype.addCommand;
+        patchRedisQueue(exported);
+        note('node-redis', { pkg: '@redis/client', wrapped: foreign(was) });
+      } else if (exported && typeof exported.PrismaClient === 'function') {
+        patchPrisma(exported);
+        note('prisma', { pkg: '@prisma/client' });
+      }
     } catch {}
     return exported;
   };

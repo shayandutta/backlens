@@ -13,11 +13,20 @@ const { TARGET } = require('./env.cjs');
 
 if (TARGET && !globalThis.__backlens) {
   globalThis.__backlens = true;
+  const { note, foreign } = require('./adapters.cjs');
+  const http = require('node:http');
+  const serverWrapped = foreign(http.Server.prototype.emit);
   require('./incoming.cjs').patchServers();
+  note('http server', { wrapped: serverWrapped });
   require('./drivers/prisma.cjs').installTracing();
   const { patchFetch, patchHttpClients } = require('./drivers/outgoing.cjs');
+  const clientWrapped = foreign(http.request);
   patchHttpClients();
-  patchFetch();
+  note('http client', { wrapped: clientWrapped });
+  if (typeof globalThis.fetch === 'function') {
+    patchFetch();
+    note('fetch');
+  }
   const { hookRequire, patchFromApp } = require('./loader.cjs');
   hookRequire();
   patchFromApp();

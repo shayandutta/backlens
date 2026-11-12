@@ -15,6 +15,7 @@ import { createReplayer } from './replay.js';
 import accessRoutes from './routes/access.js';
 import aiRoutes from './routes/ai.js';
 import behaviorRoutes from './routes/behavior.js';
+import doctorRoutes from './routes/doctor.js';
 import indexRoutes from './routes/indexes.js';
 import ingestRoutes from './routes/ingest.js';
 import measureRoutes from './routes/measure.js';
@@ -64,7 +65,7 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
   ctx.access = { profiles, env: () => projectEnv(root), sessions: null };
   ctx.access.sessions = createSessions({ profiles, env: ctx.access.env, appPort: () => (procs ? procs.appPort() : null) });
   ctx.behavior = createBehavior({ root, store, replayer, fresh: ctx.fresh, access: ctx.access });
-  const routes = [ingestRoutes, trafficRoutes, projectRoutes, measureRoutes, behaviorRoutes, accessRoutes, indexRoutes, aiRoutes].flatMap((make) => make(ctx));
+  const routes = [ingestRoutes, trafficRoutes, projectRoutes, measureRoutes, behaviorRoutes, doctorRoutes, accessRoutes, indexRoutes, aiRoutes].flatMap((make) => make(ctx));
 
   function match(req, pathname) {
     for (const r of routes) {

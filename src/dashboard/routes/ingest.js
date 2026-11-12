@@ -25,6 +25,16 @@ export default function ingestRoutes({ store, replayer, procs, ai }) {
     },
     {
       method: 'POST',
+      path: '/adapters',
+      async handle(req, res) {
+        const a = await readJson(req);
+        // The latest process to report wins: after a restart the old one is gone.
+        if (a && Array.isArray(a.adapters)) store.adapters = { pid: a.pid, at: Date.now(), list: a.adapters.slice(0, 40) };
+        return noContent(res);
+      },
+    },
+    {
+      method: 'POST',
       path: '/advice',
       async handle(req, res) {
         const a = await readJson(req);

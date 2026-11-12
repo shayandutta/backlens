@@ -148,6 +148,17 @@ run) and `backlens accept [route...]`, API `POST /api/behavior/diff|accept`, `GE
 `scripts/eval/` (not shipped): runs tasks with and without backlens through `claude -p` in fresh
 worktrees, recording success, regressions shipped, tokens, cost and turns. No results yet.
 
+## 5f. Doctor
+
+`src/recorder/adapters.cjs`, `src/dashboard/doctor.js`; `backlens doctor [--json]` (exit 1 when an
+adapter is untested or shared), MCP `doctor`, an `adapters:` line in `status`.
+
+| Part | Detail |
+|---|---|
+| Adapters | reported by the recorder as it patches: http server, http client, fetch, pg, ioredis, node-redis, Prisma, Fastify, with versions; *untested* when the major version is not in the compatibility matrix; *shared* when the methods were already wrapped (shimmer `__wrapped`, OpenTelemetry, APM agents) at first sight |
+| Overhead | up to 2 recorded reads (no data writes), 4 warm-up pairs, then 12 alternating pairs with recording on (`x-backlens-replay`) and off (`x-backlens: skip`), timed from outside the app; medians with p25–p75; not counted as traffic |
+| Measured | oldmonk: +1.7–2.5 ms (17–31%) a request on light routes |
+
 ## Measurement (how a before → after is decided)
 
 `src/shared/compare.js`, `src/dashboard/replay.js`, `src/dashboard/routes/measure.js`

@@ -3,6 +3,7 @@ import { agentUsage, usageText } from '../agent-usage/index.js';
 import { acceptText, diffText } from '../diff/format.js';
 import { readLedger } from '../evidence/ledger.js';
 import { reportMarkdown } from '../evidence/report.js';
+import { doctorText } from '../report/doctor.js';
 import { timingText } from '../shared/compare.js';
 import { ago, issueText, ms, plural, traceText } from './format.js';
 import { api, findSessions, NOT_RUNNING } from './session.js';
@@ -27,7 +28,13 @@ export async function call(name, args, cwd) {
   const where = relative(cwd, session.root) || '.';
 
   if (name === 'status') {
-    const [state, appInfo, config, access] = await Promise.all([api(session, 'GET', '/api/state'), api(session, 'GET', '/api/app?since=999999999'), api(session, 'GET', '/api/config'), api(session, 'GET', '/api/access').catch(() => ({ profiles: [] }))]);
+    const [state, appInfo, config, access, adapters] = await Promise.all([
+      api(session, 'GET', '/api/state'),
+      api(session, 'GET', '/api/app?since=999999999'),
+      api(session, 'GET', '/api/config'),
+      api(session, 'GET', '/api/access').catch(() => ({ profiles: [] })),
+      api(session, 'GET', '/api/adapters').catch(() => ({ list: [] })),
+    ]);
     // The recorder runs from the dashboard's package; this MCP server may be another install
     // (npx caches each version), and an older one misreads newer answers.
     const recorder = config.version || session.version || 'an older version (it does not report one)';
@@ -38,6 +45,7 @@ export async function call(name, args, cwd) {
       `recorded: ${plural(state.total, 'request')} on ${state.routes.filter((r) => r.calls).length} of ${state.routes.length} routes`,
       `issues: ${state.issues.length}${state.issues.length ? ` (${state.issues.filter((i) => i.severity === 'warn').length} worth fixing first)` : ''}`,
       `tests: ${config.config && config.config.test ? `\`${config.config.test}\` script` : 'no test script picked'}`,
+      `adapters: ${adapters.list.length ? adapters.list.map((a) => `${a.name}${a.package && a.version ? ` ${a.version}` : ''}${a.status === 'ok' ? '' : ` (${a.status})`}`).join(', ') : 'none reported yet'}${adapters.list.some((a) => a.status !== 'ok') ? ' - run doctor' : ''}`,
       `logins: ${access.profiles.length ? access.profiles.map((p) => `${p.name}${p.name === access.default ? ' (default)' : ''}${p.sessionOnly ? ' (this session)' : ''}`).join(', ') : 'none saved (save_login from a recorded sign-in request)'}`,
     ];
     if (recorder !== VERSION)
@@ -121,6 +129,8 @@ export async function call(name, args, cwd) {
     out.push('', 'Query counts are exact. Times are warm medians; a change counts only when it is at least 1 ms and the p25-p75 ranges do not overlap.', '', 'Last replay:', traceText(m.trace));
     return out.join('\n');
   }
+
+  if (name === 'doctor') return doctorText(await api(session, 'GET', '/api/doctor'));
 
   if (name === 'save_login') {
     const r = await api(session, 'POST', '/api/access/save', { name: args.name, id: args.id, default: args.default === true });

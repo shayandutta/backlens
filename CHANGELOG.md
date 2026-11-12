@@ -11,6 +11,10 @@
   - Redis writes from a read (cache fills, rate limits) only get a note.
   - Writes nearly every request makes are treated as infrastructure and ignored.
 
+- **`backlens doctor`** (also an MCP tool; adapters also shown in `status`):
+  - **Adapters:** which libraries the recorder hooked into, with versions, flagged *untested* when a major version isn't in the compatibility matrix and *shared* when another instrumentation tool wrapped the same methods first.
+  - **Cost of recording:** the same request with recording on and off, alternated and timed from outside the app. On a real NestJS app it measured +1.7–2.5 ms (17–31%) a request.
+
 ## 0.6.1
 
 - **Fixed: a query recorded twice.** After a transaction, a plain `pool.query` in the same request could be recorded twice, the second copy with no code location. pg-pool reuses the client and replaces its `release()`, so the transaction's lease was never cleared. This showed up as a false "same call twice" issue, seen on a real NestJS/drizzle app.
