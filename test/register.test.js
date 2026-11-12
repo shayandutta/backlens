@@ -237,3 +237,43 @@ server.listen(0, () => process.send(server.address().port));`;
   assert.deepEqual(db('/q'), ['select 1 from t'], 'pool.query is counted once, not again for its own connect');
   assert.deepEqual(db('/own'), [], "backlens's own tagged queries (the index advisor) are never recorded");
 });
+
+test('a pooled client reused after a transaction is not counted twice (pg-pool reassigns release)', async () => {
+  // Like pg-pool: one client, handed out again and again, with a fresh release() on every acquire;
+  // pool.query connects for itself and queries from its callback, later.
+  const pg = `class Client { query(text) { return Promise.resolve({ rows: [], rowCount: 0 }); } }
+const shared = new Client();
+class Pool {
+  connect(cb) {
+    const c = shared;
+    c.release = () => {};
+    if (cb) { setImmediate(() => cb(null, c, () => c.release())); return; }
+    return new Promise((r) => setImmediate(() => r(c)));
+  }
+  query(text) { return new Promise((resolve) => this.connect((err, c, done) => c.query(text).then((r) => { done(); resolve(r); }))); }
+}
+module.exports = { Pool, Client };`;
+  const orm = `const later = (fn) => new Promise((resolve, reject) => setImmediate(() => fn().then(resolve, reject)));
+module.exports = (pool) => ({
+  transaction: async (fn) => {
+    const c = await later(() => pool.connect());
+    await later(() => c.query('BEGIN'));
+    try { await fn({ run: (t) => later(() => c.query(t)) }); await later(() => c.query('COMMIT')); } finally { c.release(); }
+  },
+});`;
+  const app = `const http = require('node:http');
+const { Pool } = require('pg');
+const pool = new Pool();
+const db = require('orm')(pool);
+const server = http.createServer(async (req, res) => {
+  await db.transaction((tx) => tx.run('update orders set paid = true'));
+  await db.transaction((tx) => tx.run('insert into audit values (1)'));
+  await pool.query('select * from orders where id = 1');
+  res.end('ok');
+});
+server.listen(0, () => process.send(server.address().port));`;
+  const traces = await record(['/pay'], { 'node_modules/pg/index.js': pg, 'node_modules/orm/index.js': orm, 'pay.js': app }, 'pay.js');
+  const spans = traces.find((t) => t.url === '/pay').spans.filter((s) => s.kind === 'db');
+  assert.deepEqual(spans.map((s) => s.name), ['BEGIN', 'update orders set paid = true', 'COMMIT', 'BEGIN', 'insert into audit values (1)', 'COMMIT', 'select * from orders where id = 1']);
+  assert.ok(spans.at(-1).frames.length, 'the pool.query span keeps its code line');
+});

@@ -24,13 +24,15 @@ function lease(client) {
   const trace = storage.getStore();
   if (!client || !trace) return client;
   leases.set(client, trace);
-  if (!client.__backlensRelease) {
-    const release = client.release;
-    client.__backlensRelease = true;
-    client.release = function () {
+  // pg-pool gives the client a new release() on every acquire, so wrap whatever is there now.
+  const release = client.release;
+  if (typeof release === 'function' && !release.__backlens) {
+    const wrapped = function () {
       leases.delete(client);
       return release.apply(this, arguments);
     };
+    wrapped.__backlens = true;
+    client.release = wrapped;
   }
   return client;
 }
@@ -126,7 +128,9 @@ function patchPg(pg) {
     Pool.prototype.connect = function (cb) {
       const sb = sandbox.current();
       if (!sb) {
-        // pool.query connects for itself (insidePool): not the app's lease.
+        // pool.query connects for itself (insidePool): not the app's lease, whatever the client
+        // was used for before it went back to the pool.
+        if (insidePool && typeof cb === 'function') return connect.call(this, (err, client, done) => (leases.delete(client), cb(err, client, done)));
         if (insidePool || !storage.getStore()) return connect.apply(this, arguments);
         if (typeof cb === 'function') return connect.call(this, (err, client, done) => cb(err, lease(client), done && ((e) => (leases.delete(client), done(e)))));
         return connect.apply(this, arguments).then(lease);

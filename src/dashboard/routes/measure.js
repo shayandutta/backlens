@@ -95,6 +95,13 @@ export default function measureRoutes({ root, store, replayer, fresh, ai, access
         store.measured.set(key, now);
         const seen = new Map();
         for (const t of samples) for (const i of checkTrace(t)) if (!seen.has(i.title)) seen.set(i.title, { type: i.type, title: i.title, sites: i.sites, sql: i.sql });
+        // The code changed and an issue the dashboard lists for this route is gone from the replay
+        // (same kind, same statements; its lines may have moved): count it as fixed, as Keep does.
+        // The replay joins the recorded requests as the after-fix one, so anything still there
+        // shows again from it, and a later request with the issue brings it back.
+        const listed = store.summary().issues.filter((i) => i.route === route && i.type !== 'index');
+        const gone = listed.filter((i) => ![...seen.values()].some((x) => x.type === i.type && x.sql === i.sql));
+        if (gone.length) store.markFixed(gone[0].key, last);
         const brief = (x) => x && { ms: x.ms, lo: x.lo, hi: x.hi, runs: x.runs, status: x.status, queries: x.queries, redis: x.redis, http: x.http };
         record(root, 'measure', { route, as, previous: brief(previous), now: brief(now), change: compareTimings(previous, now), issues: seen.size });
         return json(res, 200, {
