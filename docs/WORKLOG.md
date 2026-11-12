@@ -5,6 +5,38 @@ Numbers come from real runs; say so when something was not measured.
 
 ---
 
+## 2026-11-13 (later): 0.7.0 ready; direction past 0.7
+
+- **0.7.0 is prepared on `v0.7/finish` and not released yet.** It includes:
+  - the compatibility matrix in CI;
+  - salted hashes;
+  - reads that write;
+  - `doctor` (+1.7–2.5 ms per request on oldmonk);
+  - confidence labels (the three serial-await hints an agent dismissed are now *check*, with its reasons);
+  - code paths;
+  - local-replay labels;
+  - expired JWTs;
+  - unverifiable-field note;
+  - sandboxed writes in diff (refresh_tokens unchanged after 8 replays);
+  - Diff tab.
+- 112 tests. BullMQ deferred to 0.8. The Diff tab's visual check is left to the user.
+- **External critique and vision reviewed.** Adopted:
+  - mutation lab;
+  - concurrency probes;
+  - impact-scoped diff;
+  - counterfactual lab;
+  - app memory.
+
+  Deferred:
+  - production profiles;
+  - time travel;
+  - OpenTelemetry rewrite;
+  - other languages.
+
+  See ROADMAP "After 0.7".
+
+---
+
 ## 2026-11-13: 0.7 started, trust before features (branch `v0.7/compat-matrix`)
 
 ### Done
