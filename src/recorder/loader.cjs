@@ -7,6 +7,7 @@ const { patchPg } = require('./drivers/pg.cjs');
 const { patchPrisma } = require('./drivers/prisma.cjs');
 const { patchIoredis, patchRedisQueue } = require('./drivers/redis.cjs');
 const { wrapFastify } = require('./frameworks/fastify.cjs');
+const { patchBullmq } = require('./drivers/bullmq.cjs');
 const { foreign, note } = require('./adapters.cjs');
 
 function hookRequire() {
@@ -30,6 +31,9 @@ function hookRequire() {
         const was = Queue && Queue.prototype && Queue.prototype.addCommand;
         patchRedisQueue(exported);
         note('node-redis', { pkg: '@redis/client', wrapped: foreign(was) });
+      } else if (request === 'bullmq') {
+        patchBullmq(exported);
+        note('bullmq', { pkg: 'bullmq' });
       } else if (exported && typeof exported.PrismaClient === 'function') {
         patchPrisma(exported);
         note('prisma', { pkg: '@prisma/client' });
@@ -46,7 +50,7 @@ function hookRequire() {
 // project actually has.
 function patchFromApp() {
   const fromApp = Module.createRequire(path.join(process.cwd(), 'backlens-probe.js'));
-  for (const name of ['pg', 'ioredis', 'redis', '@redis/client', '@prisma/client']) {
+  for (const name of ['pg', 'ioredis', 'redis', '@redis/client', '@prisma/client', 'bullmq']) {
     try {
       fromApp.resolve(name);
     } catch {

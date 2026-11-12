@@ -8,6 +8,11 @@
   - It reports each change nothing noticed: a gap an agent could fall into silently. Exit 1 on a gap.
   - An interrupted run's file is restored on the next start.
 - **`diff`:** a refused request (401/403) that now gets through is reported as *broken*, not *better*.
+- **BullMQ:**
+  - **Enqueues:** `Queue.add` / `addBulk` inside a request become `job` spans, with the code line and the job id.
+  - **Job runs:** each run (`Worker.callProcessJob`) is its own trace (`JOB /<queue>/<name>`), so a job's queries are recorded and checked like a request's: N+1s, repeats.
+  - **Links:** a request links to the jobs it queued and their runs (retries included; `get_request` notes a job that ran more than once), and a run links back to its request.
+  - **Checked** in the compatibility matrix with real BullMQ 5 on Redis.
 
 ## 0.7.0
 

@@ -143,3 +143,31 @@ describe('Frameworks', () => {
     });
   }
 });
+
+describe('Queues', { skip: !env.redis && 'REDIS_URL not set' }, () => {
+  test('bullmq 5: the request shows what it queued; the job run is its own trace, linked by id', async () => {
+    const q = `backlens-compat-${Date.now()}`;
+    const app = `const { Queue, Worker } = require('bullmq');
+const IORedis = require('ioredis');
+const connection = new IORedis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
+const queue = new Queue('${q}', { connection });
+const reader = new IORedis(process.env.REDIS_URL);
+let done;
+const ran = new Promise((r) => (done = r));
+new Worker('${q}', async (job) => { await reader.get('backlens:compat:job:' + job.data.n); done(); }, { connection: new IORedis(process.env.REDIS_URL, { maxRetriesPerRequest: null }) });
+const routes = { '/enqueue': async () => { await queue.add('welcome', { n: 1 }, { removeOnComplete: true }); await ran; } };` + serve;
+    const t = await run({ deps: { bullmq: '^5', ioredis: '^5' }, app, paths: ['/enqueue'] });
+    const req = t['/enqueue'];
+    const enq = req.spans.find((s) => s.kind === 'job');
+    assert.ok(enq, 'the enqueue is a span of the request');
+    assert.equal(enq.name, `ENQUEUE ${q}:welcome`);
+    assert.ok(enq.job && enq.job.id, 'with the job id');
+    assert.ok(enq.frames.some((f) => f.file === 'app.js'), 'and the code line that queued it');
+    const run1 = t[`/${q}/welcome`];
+    assert.ok(run1, 'the job run is a trace of its own');
+    assert.equal(run1.method, 'JOB');
+    assert.equal(run1.job.id, enq.job.id, 'linked to the request by job id');
+    assert.equal(run1.status, 200);
+    assert.deepEqual(calls(run1, 'redis'), ['GET backlens:compat:job:1'], "the job's own calls are recorded in its trace");
+  });
+});

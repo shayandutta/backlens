@@ -24,6 +24,7 @@ const TESTED = {
   '@redis/client': ['1', '5'],
   fastify: ['4', '5'],
   '@prisma/client': ['5', '6', '7'],
+  bullmq: ['5'],
 };
 
 const found = new Map();

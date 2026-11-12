@@ -14,7 +14,8 @@ Numbers come from real runs; say so when something was not measured.
 - **On oldmonk** (4 mutants, with the tests): all caught, by the tests. Every one was an `@UseGuards(AuthGuard, AdminGuard)` or `@UseGuards(CsrfGuard)` removal. The diff alone did not catch them, because every recorded admin request was authorized. `src` was identical to the backup afterwards.
 - **Found a diff gap:** a 403 that became a 200 was rated *better*. It is now *broken* ("a refused request now gets through").
 - 115 tests.
-- **Next in 0.8:** BullMQ correlation.
+- **BullMQ correlation:** enqueue spans, job-run traces, request ↔ job links. Checked with real BullMQ 5 on Redis (compat case), and with a dashboard link test. 116 tests.
+- **Next:** 0.9, concurrency probes and an impact-scoped diff.
 
 ---
 

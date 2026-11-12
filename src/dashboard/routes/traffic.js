@@ -5,6 +5,24 @@ import { checkTrace, mapOf, routeOf } from '../../analysis/index.js';
 import { json } from '../http.js';
 
 /** Recorded traffic: state, the map, one trace, clearing, snapshots, and what agents spent. */
+/**
+ * Background work linked to a trace: the jobs a request queued (and the traces of their runs), or,
+ * for a job run, the request that queued it. Linked by queue name and job id.
+ */
+function jobLinks(store, trace) {
+  const all = [...store.traces, ...store.testRun.traces];
+  const queued = [];
+  for (const s of trace.spans || []) for (const j of s.job ? [s.job] : s.jobs || []) if (j && j.id) queued.push(j);
+  const brief = (t) => ({ id: t.id, route: routeOf(t.method, t.url, t.template), status: t.status, duration: t.duration, queries: t.spans.filter((x) => x.kind === 'db').length, attempt: t.job.attempt });
+  const jobs = queued.map((j) => ({ ...j, runs: all.filter((t) => t.job && t.job.queue === j.queue && t.job.id === j.id).map(brief) }));
+  let queuedBy = null;
+  if (trace.job) {
+    const parent = all.find((t) => t !== trace && (t.spans || []).some((s) => [s.job, ...(s.jobs || [])].some((j) => j && j.queue === trace.job.queue && j.id === trace.job.id)));
+    if (parent) queuedBy = { id: parent.id, route: routeOf(parent.method, parent.url, parent.template) };
+  }
+  return { jobs, queuedBy };
+}
+
 export default function trafficRoutes({ root, store, snapshotDir }) {
   return [
     {
@@ -33,7 +51,7 @@ export default function trafficRoutes({ root, store, snapshotDir }) {
       handle(req, res, url, m) {
         const trace = store.findTrace(m[1]);
         if (!trace) return json(res, 404, { error: 'gone' });
-        return json(res, 200, { trace: { ...trace, route: routeOf(trace.method, trace.url, trace.template) }, issues: checkTrace(trace) });
+        return json(res, 200, { trace: { ...trace, route: routeOf(trace.method, trace.url, trace.template) }, issues: checkTrace(trace), ...jobLinks(store, trace) });
       },
     },
     {

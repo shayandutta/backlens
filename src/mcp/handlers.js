@@ -94,10 +94,17 @@ export async function call(name, args, cwd) {
 
   if (name === 'get_request') {
     if (typeof args.id !== 'string' || !/^[\w-]{1,80}$/.test(args.id)) throw new Error('Give a request id from list_requests.');
-    const { trace, issues } = await api(session, 'GET', `/api/trace/${args.id}`).catch((err) => {
+    const { trace, issues, jobs = [], queuedBy = null } = await api(session, 'GET', `/api/trace/${args.id}`).catch((err) => {
       throw new Error(err.message === 'gone' ? 'That request is no longer in memory (backlens keeps the last 1000).' : err.message);
     });
-    return traceText(trace, issues);
+    const extra = [];
+    if (queuedBy) extra.push('', `Queued by request ${queuedBy.id} (${queuedBy.route}).`);
+    if (jobs.length) {
+      extra.push('', 'Jobs it queued:');
+      for (const j of jobs) extra.push(`  ${j.queue}:${j.name} id ${j.id}: ${j.runs.length ? j.runs.map((r) => `run ${r.id} ${r.status === 200 ? 'ok' : 'failed'}, ${r.duration} ms, ${r.queries} queries${r.attempt ? ` (retry ${r.attempt})` : ''}`).join('; ') : 'not run yet (or its worker runs outside backlens)'}`);
+      if (jobs.some((j) => j.runs.length > 1)) extra.push('  A job ran more than once: check retries and idempotency.');
+    }
+    return traceText(trace, issues) + extra.join('\n');
   }
 
   if (name === 'measure_request' || name === 'measure_url') {
