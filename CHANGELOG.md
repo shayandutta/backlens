@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.7)
+## 0.7.0
 
 - **Compatibility matrix:** `npm run test:compat`, also run in CI. The recorder runs against real pg (8.11 and the latest 8), drizzle-orm, Kysely, ioredis 5, node-redis 4 and 5, Express 4 and 5, and Fastify 4 and 5, on real Postgres and Redis. Each call must be recorded once, in its request, with the app's code line. It fails on 0.6.0's double count.
 - **Value hashes are keyed per app process (HMAC-SHA-256)**, so a likely value (an email, a small id) can't be matched to its hash.
@@ -20,6 +20,13 @@
   - **Serial awaits** are never *confirmed*. They are *check* when one call takes a lock (`FOR UPDATE`, advisory locks) or follows an empty result (a fallback lookup).
   - **CI** doesn't fail on a new finding marked *check*; `--strict` still counts it.
   - **On a real app**, all three serial-await hints that an agent had dismissed by reading the code are now *check*, with the same reasons it gave.
+- **Code paths:** issues show the chain of app code behind them (handler → service → repository), and N+1 fixes name the caller that likely loops.
+- **Expired sign-ins:** a recorded request whose JWT has expired isn't replayed as is. `diff` signs in with the saved login, and `measure` suggests `as`. Before, an optional-auth route quietly answered as an anonymous user and showed up as a break.
+- **Fields the diff can't verify:** `diff` reports how many fields were null in every baseline response, since a changed value can't be seen there.
+- **Writes in `diff`:** recorded POST/PUT/PATCH/DELETE requests whose changes are in Postgres join the baseline (up to 10). They are replayed in the rolled-back sandbox, and a leak stops write replays with a warning.
+- **Diff tab** in the dashboard: run a diff, see what changed, accept routes.
+- **Timings are labelled local replays,** not production latency.
+- **Deferred to 0.8:** BullMQ job correlation.
 
 ## 0.6.1
 
