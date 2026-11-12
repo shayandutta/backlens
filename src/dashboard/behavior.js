@@ -83,9 +83,11 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
       const payload = store.replays.get(t.id);
       if (!payload || !payload.url) continue;
       if (!SAFE_METHODS.includes(payload.method)) {
-        // A write that worked, made only Postgres changes through pg and called nothing outside:
-        // it can be replayed inside a transaction that is rolled back.
-        if (t.status < 400 && !newWrites.has(route) && sandboxCheck(t).ok) newWrites.set(route, { route, payload });
+        // A write that worked, whose changes are in Postgres (made through pg) and that called
+        // nothing outside: the rolled-back transaction undoes it. One with no Postgres write has
+        // its effects elsewhere (memory, files, Redis), where nothing would undo them.
+        const pgWrite = t.spans.some((x) => x.kind === 'db' && x.drv === 'pg' && /^\s*(insert|update|delete|merge)\b/i.test(x.name));
+        if (t.status < 400 && pgWrite && !newWrites.has(route) && sandboxCheck(t).ok) newWrites.set(route, { route, payload });
         continue;
       }
       const writes = dataWrites(t, ambient);
