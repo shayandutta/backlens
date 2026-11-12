@@ -105,3 +105,14 @@ test('a password in no .env file is kept for the session only, never written', a
     assert.ok(!onDisk.includes('hunter22'));
   });
 });
+
+test('a JWT says when it has expired', async () => {
+  const { jwtExpired } = await import('../src/access/token.js');
+  const jwt = (exp) => `Bearer x.${Buffer.from(JSON.stringify({ sub: 1, exp })).toString('base64url')}.sig`;
+  const now = Date.now();
+  assert.equal(jwtExpired({ authorization: jwt(Math.floor(now / 1000) - 10) }), true);
+  assert.equal(jwtExpired({ authorization: jwt(Math.floor(now / 1000) + 3600) }), false);
+  assert.equal(jwtExpired({ authorization: jwt(Math.floor(now / 1000) + 30) }), true, 'about to expire counts');
+  assert.equal(jwtExpired({ authorization: 'Bearer opaque-token' }), null);
+  assert.equal(jwtExpired({ cookie: 'sid=1' }), null);
+});

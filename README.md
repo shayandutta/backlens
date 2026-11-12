@@ -275,7 +275,7 @@ Redis passwords never show: `AUTH`, `HELLO` and similar commands are recorded by
 - The "wait for each other" hint skips calls that use an earlier call's result, but it cannot see every dependency: read it as a question, not a verdict.
 - The index advisor needs Postgres 16+ and looks at equality filters and the sort above them. With Prisma it needs a `pg` driver adapter (the default in Prisma 7).
 - Prisma on its Rust engine (5 and 6) is read through Prisma's tracing hook. If your app sets up `@prisma/instrumentation` itself, yours takes precedence and backlens sees only Prisma 7 or adapter queries.
-- Timings on a dev machine are rough; query counts are exact. `measure_request` restarts the app first so before and after are both measured on a fresh run (~7 s on a NestJS dev server).
+- Timings are local replays on your machine, with recording on: good for comparing before and after the same change, not a measure of production latency. Query counts are exact. `measure_request` restarts the app first so before and after are both measured on a fresh run (~7 s on a NestJS dev server).
 - `diff` checks reads (GET) only, one request per route; a route the app has not served is not checked.
 
 ## Develop

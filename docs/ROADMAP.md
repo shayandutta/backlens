@@ -140,6 +140,29 @@ See WORKLOG 2026-11-12.
 Phase 1 comes first because the diff verdicts rely on the same measurement. If backlens overclaims
 there, users will stop believing its verdicts.
 
+## 0.7: trust before features
+
+0.6 in real use showed every problem was correctness (the recorder missing or double-counting
+queries, stale issues), not a missing feature. 0.7 makes what backlens says trustworthy.
+
+| # | Item | Done when |
+|---|---|---|
+| 1 | Compatibility matrix against real libraries (pg + pg-pool, drizzle, Kysely, ioredis, node-redis, Express, Fastify; Prisma later) on real Postgres and Redis in CI | 0.6.0's transaction and double-count bugs fail it; 0.7 passes |
+| 2 | `backlens doctor`: active adapters, degraded ones, measured recording overhead | prints adapters and overhead for a real app |
+| 3 | Replays that write: a replayed GET that wrote is flagged, and skipped by `diff` | a rate limiter's Redis write is reported; a GET that inserts is skipped |
+| 4 | Salted value hashes per recorder session | the same value hashes differently across sessions; detection unchanged |
+| 5 | Confidence on every finding (confirmed / likely / check) with its evidence | shown in CLI, MCP, dashboard and report |
+| 6 | Caller chain in issues, with the fix aimed at the top of the chain | an N+1 names the service loop, not only the repository line |
+| 7 | BullMQ: request → job → queries correlation | a request that enqueues a job shows the job's queries |
+| 8 | Every timing labelled "local replay", never production | no output implies production performance |
+| 9 | 0.6 leftovers: diff view in the dashboard, sandboxed writes in `diff`, null-only fields marked unverifiable, expired tokens on optional-auth routes | each has a test |
+
+Order: 1, then 4 and 3, then 2, then 5 and 6, then 7. Not in 0.7: an OpenTelemetry rewrite (maybe
+OTel spans as an optional input later), other languages, MySQL or Mongo, more AI features.
+
+Release gate: the matrix passes in CI; `doctor` reports overhead on a real app; 10 clean `diff`
+runs with no false alarm; the eval pilot run at least once.
+
 ## Success metrics
 
 - Tokens per task and task success, with and without backlens, measured with the existing `usage`

@@ -12,6 +12,32 @@ export const where = (span) => (span.frames && span.frames[0]) || null;
 /** file:line of a frame. */
 export const at = (f) => (f ? `${f.file}:${f.line}` : 'unknown');
 
+/**
+ * The app code that led to a call, outermost first (handler → service → repository), as
+ * "fn (file:line)", at most `max` steps, with repeats of one function folded.
+ */
+export function chainOf(frames, max = 6) {
+  const steps = [];
+  for (const f of [...(frames || [])].reverse()) {
+    const label = `${f.fn || '(anonymous)'} (${f.file}:${f.line})`;
+    if (steps.length && steps[steps.length - 1].startsWith(`${f.fn || '(anonymous)'} (${f.file}:`)) steps[steps.length - 1] = label;
+    else steps.push(label);
+  }
+  return steps.length > max ? [steps[0], '…', ...steps.slice(-(max - 2))] : steps;
+}
+
+/**
+ * Where the loop behind an N+1 most likely is: the first caller above the call site that is a
+ * different function (the repository line runs the query; its caller iterates). Null when the
+ * stack shows nothing above the call site.
+ */
+export function loopSite(frames) {
+  const fs = frames || [];
+  if (fs.length < 2) return null;
+  const site = fs[0];
+  return fs.slice(1).find((f) => f.fn !== site.fn || f.file !== site.file) || null;
+}
+
 /** Where two calls' code paths part: the first frame that differs in each. */
 export function splitSites(a, b) {
   const fa = a.frames || [];

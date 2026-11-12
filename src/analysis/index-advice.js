@@ -60,6 +60,7 @@ export function indexIssues(traces, advice) {
       issues.push({
         type: 'index',
         severity: lowCardinality ? 'hint' : 'warn',
+        evidence: { rows: a.rows, lowCardinality },
         title: `No index for ${a.table} filtered by ${a.columns.join(', ')}`,
         fix: lowCardinality
           ? `Postgres reads every row of ${a.table} (${a.rows.toLocaleString('en')} rows), but ${a.columns.join(', ')} hold${a.columns.length === 1 ? 's' : ''} only a few different values, so a plain index rarely helps. Only if the value filtered on is rare: CREATE INDEX CONCURRENTLY ${name} ON ${a.schema === 'public' ? '' : `${a.schema}.`}${a.table} (${colText}) WHERE <that value>;`

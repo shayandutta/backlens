@@ -3,6 +3,7 @@ import { agentUsage, usageText } from '../agent-usage/index.js';
 import { acceptText, diffText } from '../diff/format.js';
 import { readLedger } from '../evidence/ledger.js';
 import { reportMarkdown } from '../evidence/report.js';
+import { doctorText } from '../report/doctor.js';
 import { timingText } from '../shared/compare.js';
 import { ago, issueText, ms, plural, traceText } from './format.js';
 import { api, findSessions, NOT_RUNNING } from './session.js';
@@ -27,7 +28,13 @@ export async function call(name, args, cwd) {
   const where = relative(cwd, session.root) || '.';
 
   if (name === 'status') {
-    const [state, appInfo, config, access] = await Promise.all([api(session, 'GET', '/api/state'), api(session, 'GET', '/api/app?since=999999999'), api(session, 'GET', '/api/config'), api(session, 'GET', '/api/access').catch(() => ({ profiles: [] }))]);
+    const [state, appInfo, config, access, adapters] = await Promise.all([
+      api(session, 'GET', '/api/state'),
+      api(session, 'GET', '/api/app?since=999999999'),
+      api(session, 'GET', '/api/config'),
+      api(session, 'GET', '/api/access').catch(() => ({ profiles: [] })),
+      api(session, 'GET', '/api/adapters').catch(() => ({ list: [] })),
+    ]);
     // The recorder runs from the dashboard's package; this MCP server may be another install
     // (npx caches each version), and an older one misreads newer answers.
     const recorder = config.version || session.version || 'an older version (it does not report one)';
@@ -38,6 +45,7 @@ export async function call(name, args, cwd) {
       `recorded: ${plural(state.total, 'request')} on ${state.routes.filter((r) => r.calls).length} of ${state.routes.length} routes`,
       `issues: ${state.issues.length}${state.issues.length ? ` (${state.issues.filter((i) => i.severity === 'warn').length} worth fixing first)` : ''}`,
       `tests: ${config.config && config.config.test ? `\`${config.config.test}\` script` : 'no test script picked'}`,
+      `adapters: ${adapters.list.length ? adapters.list.map((a) => `${a.name}${a.package && a.version ? ` ${a.version}` : ''}${a.status === 'ok' ? '' : ` (${a.status})`}`).join(', ') : 'none reported yet'}${adapters.list.some((a) => a.status !== 'ok') ? ' - run doctor' : ''}`,
       `logins: ${access.profiles.length ? access.profiles.map((p) => `${p.name}${p.name === access.default ? ' (default)' : ''}${p.sessionOnly ? ' (this session)' : ''}`).join(', ') : 'none saved (save_login from a recorded sign-in request)'}`,
     ];
     if (recorder !== VERSION)
@@ -109,6 +117,8 @@ export async function call(name, args, cwd) {
       if (m.recorded) out.push(row('recorded traffic', m.recorded), '(recorded traffic includes cold requests, so it is not compared)');
       out.push('', 'First measurement of this request: saved. Change the code, then measure it again to compare warm against warm.');
     }
+    if (m.writes && m.writes.length) out.push('', `Warning: this ${m.trace.method} changed data each time it was replayed (${m.writes.slice(0, 3).join(', ')}). Replaying it again changes it again.`);
+    else if (m.redisWrites && m.redisWrites.length) out.push('', `It also wrote to Redis on each replay (${m.redisWrites.slice(0, 3).join(', ')}): usually a cache fill or rate limit.`);
     if (m.sandbox) {
       if (m.sandbox.contained) out.push('', `Sandbox: every run's ${m.sandbox.statements} Postgres statements were rolled back.${m.sandbox.redisWrites.length ? ` Not undone: Redis ${m.sandbox.redisWrites.join(', ')}.` : ''}`);
       else out.push('', `WARNING: the sandbox did not hold: ${m.sandbox.leaked ? `${m.sandbox.leaked} queries ran on a connection outside the transaction` : m.sandbox.error}. Writes may have reached the database.`);
@@ -116,9 +126,11 @@ export async function call(name, args, cwd) {
     if (m.otherStatuses) out.push('', `${m.otherStatuses.runs} of ${m.otherStatuses.of} runs answered ${m.otherStatuses.statuses.join(', ')} instead of ${m.now.status} and were left out${m.otherStatuses.statuses.includes(429) ? ' (rate limited)' : ''}.`);
     if (m.restarted) out.push('', 'backlens restarted the app first, so this run is measured fresh like the one it is compared with.');
     out.push('', m.issues.length ? `Issues still in the replayed request:\n${m.issues.map((i, n) => `${n + 1}. ${i.title}${i.sites && i.sites.length ? `  (${i.sites.join(' -> ')})` : ''}`).join('\n')}` : 'No issues in the replayed request.');
-    out.push('', 'Query counts are exact. Times are warm medians; a change counts only when it is at least 1 ms and the p25-p75 ranges do not overlap.', '', 'Last replay:', traceText(m.trace));
+    out.push('', 'Query counts are exact. Times are local replays on this machine (warm medians, recording on), not production latency; a change counts only when it is at least 1 ms and the p25-p75 ranges do not overlap.', '', 'Last replay:', traceText(m.trace));
     return out.join('\n');
   }
+
+  if (name === 'doctor') return doctorText(await api(session, 'GET', '/api/doctor'));
 
   if (name === 'save_login') {
     const r = await api(session, 'POST', '/api/access/save', { name: args.name, id: args.id, default: args.default === true });

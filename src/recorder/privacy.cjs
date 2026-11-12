@@ -3,9 +3,16 @@
  * Values never leave the app. Query parameters and results become short hashes, which are enough
  * to tell two identical calls from two different ones and to see that a later call used a value an
  * earlier one returned. Redis keys have personal data masked.
+ *
+ * The hashes are keyed with a secret made fresh for each app process (HMAC), so a hash cannot be
+ * matched against guessed values (a likely email, a small id) outside it. Hashes are only ever
+ * compared within one request, which runs in one process.
  */
 
-const { createHash } = require('node:crypto');
+const { createHmac, randomBytes } = require('node:crypto');
+
+const KEY = randomBytes(32);
+const keyed = (text) => createHmac('sha256', KEY).update(text).digest('hex');
 
 /** Keys often carry personal data: rl:login:email:ada@x.com becomes rl:login:email:{email}. */
 function redact(text) {
@@ -22,7 +29,7 @@ function hashValues(values) {
   if (values === undefined) return null;
   try {
     const json = JSON.stringify(values, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
-    return createHash('sha1').update(json).digest('hex').slice(0, 12);
+    return keyed(json).slice(0, 12);
   } catch {
     return null;
   }
@@ -33,7 +40,7 @@ function hashValues(values) {
  * returned. If a later query's parameter matches a value an earlier one returned, it depends on
  * it, and the two cannot run together. Only short hashes are kept, never the values.
  */
-const fp = (v) => createHash('sha1').update(String(v)).digest('hex').slice(0, 10);
+const fp = (v) => keyed(String(v)).slice(0, 10);
 const scalar = (v) => (typeof v === 'string' && v.length > 0 && v.length <= 200) || typeof v === 'number' || typeof v === 'bigint';
 
 function paramPrints(params) {

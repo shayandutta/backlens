@@ -113,6 +113,13 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
   {
+    name: 'doctor',
+    description:
+      "Whether backlens's numbers can be trusted on this app: the libraries the recorder hooked into (with versions, and whether each is on a tested version or shared with another instrumentation tool), and the measured cost of recording a request. Call it when results look odd.",
+    inputSchema: { type: 'object', properties: {} },
+    annotations: { readOnlyHint: true },
+  },
+  {
     name: 'report',
     description:
       'Markdown evidence of what backlens checked during this work, for a pull request description: the last behavior diff, breaks caught on the way, intended changes accepted, and measured before → after per request. From records written as the checks ran.',

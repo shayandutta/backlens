@@ -17,7 +17,9 @@ export function format({ routes, issues, failing }, traces) {
   for (const i of issues) {
     const tag = i.isNew ? (i.severity === 'warn' ? red('new   ') : yellow('new   ')) : dim('known ');
     const kind = i.severity === 'warn' ? '' : dim(' (hint)');
-    lines.push(`  ${tag}${i.title}${kind}  ${dim(`${i.route}, ${i.seen}/${i.of} requests`)}`);
+    const conf = i.confidence ? `, ${i.confidence.level}` : '';
+    lines.push(`  ${tag}${i.title}${kind}  ${dim(`${i.route}, ${i.seen}/${i.of} requests${conf}`)}`);
+    if (i.confidence && i.confidence.against.length) lines.push(`        ${dim(`doubts: ${i.confidence.against.join('; ')}`)}`);
     lines.push(`        ${dim(i.sites.join(' → '))}`);
   }
   if (issues.length) lines.push('');

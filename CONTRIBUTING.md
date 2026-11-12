@@ -52,6 +52,15 @@ after, and compare.
 
 By contributing you agree your work is released under the [MIT license](LICENSE).
 
+## Compatibility matrix
+
+`npm run test:compat` runs the recorder against real library versions (pg, drizzle, Kysely,
+ioredis, node-redis, Express, Fastify) on real Postgres and Redis. It needs `PG_URL` and
+`REDIS_URL`; cases whose service is missing are skipped. Each case installs into a cached folder
+under the system temp directory. CI runs it with Postgres 16 and Redis 7 service containers.
+
+A bug found in real use gets a scenario here first: the test should fail before the fix.
+
 ## Releasing
 
 1. Bump `version` in `package.json` (and `package-lock.json` via `npm install --package-lock-only`), add a `CHANGELOG.md` entry.

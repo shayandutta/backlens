@@ -63,8 +63,14 @@ test('the behavior diff takes a baseline, stays quiet, and catches a lost field 
     const fail = await api(session, 'POST', '/api/behavior/diff', {});
     assert.match(fail.results[0].findings[0].what, /answers 500 \(was 200\)/);
 
-    // An intended change, accepted: the next diff compares with it.
+    // The dashboard's Diff tab reads the last result and the baseline's size.
+    const shown = await api(session, 'GET', '/api/behavior/last');
+    assert.equal(shown.baseline.routes, 2);
+    assert.equal(shown.last.results[0].route, 'GET /users/:id');
+
+    // An intended change, accepted: the next diff compares with it, and it leaves the list.
     await api(session, 'POST', '/api/behavior/accept', { routes: ['GET /users/:id'] });
+    assert.deepEqual((await api(session, 'GET', '/api/behavior/last')).last.results, []);
     const after = await api(session, 'POST', '/api/behavior/diff', {});
     assert.deepEqual(after.results, []);
   } finally {

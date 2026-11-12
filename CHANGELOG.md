@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.7.0
+
+- **Compatibility matrix:** `npm run test:compat`, also run in CI. The recorder runs against real pg (8.11 and the latest 8), drizzle-orm, Kysely, ioredis 5, node-redis 4 and 5, Express 4 and 5, and Fastify 4 and 5, on real Postgres and Redis. Each call must be recorded once, in its request, with the app's code line. It fails on 0.6.0's double count.
+- **Value hashes are keyed per app process (HMAC-SHA-256)**, so a likely value (an email, a small id) can't be matched to its hash.
+- **Reads that write:**
+  - `diff` no longer replays a GET that changed data when it was recorded (SQL writes or outgoing non-GET calls), and says why.
+  - It reports `now writes when read: …` when a change makes a read start writing.
+  - `measure` warns when a replayed read changed data.
+  - Redis writes from a read (cache fills, rate limits) only get a note.
+  - Writes nearly every request makes are treated as infrastructure and ignored.
+
+- **`backlens doctor`** (also an MCP tool; adapters also shown in `status`):
+  - **Adapters:** which libraries the recorder hooked into, with versions, flagged *untested* when a major version isn't in the compatibility matrix and *shared* when another instrumentation tool wrapped the same methods first.
+  - **Cost of recording:** the same request with recording on and off, alternated and timed from outside the app. On a real NestJS app it measured +1.7–2.5 ms (17–31%) a request.
+
+- **Confidence on every finding:** *confirmed*, *likely* or *check*, with the evidence and the doubts. It shows in MCP, the dashboard, the CI report and `list_issues`.
+  - **Repeats** become *check* when a copy has no code line, when copies overlap in time (the 0.6 false positive), when a write to the table came between them, or when the repeat is seen in under half the requests.
+  - **Serial awaits** are never *confirmed*. They are *check* when one call takes a lock (`FOR UPDATE`, advisory locks) or follows an empty result (a fallback lookup).
+  - **CI** doesn't fail on a new finding marked *check*; `--strict` still counts it.
+  - **On a real app**, all three serial-await hints that an agent had dismissed by reading the code are now *check*, with the same reasons it gave.
+- **Code paths:** issues show the chain of app code behind them (handler → service → repository), and N+1 fixes name the caller that likely loops.
+- **Expired sign-ins:** a recorded request whose JWT has expired isn't replayed as is. `diff` signs in with the saved login, and `measure` suggests `as`. Before, an optional-auth route quietly answered as an anonymous user and showed up as a break.
+- **Fields the diff can't verify:** `diff` reports how many fields were null in every baseline response, since a changed value can't be seen there.
+- **Writes in `diff`:** recorded POST/PUT/PATCH/DELETE requests whose changes are in Postgres join the baseline (up to 10). They are replayed in the rolled-back sandbox, and a leak stops write replays with a warning.
+- **Diff tab** in the dashboard: run a diff, see what changed, accept routes.
+- **Timings are labelled local replays,** not production latency.
+- **Deferred to 0.8:** BullMQ job correlation.
+
 ## 0.6.1
 
 - **Fixed: a query recorded twice.** After a transaction, a plain `pool.query` in the same request could be recorded twice, the second copy with no code location. pg-pool reuses the client and replaces its `release()`, so the transaction's lease was never cleared. This showed up as a false "same call twice" issue, seen on a real NestJS/drizzle app.

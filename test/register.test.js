@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -276,4 +277,14 @@ server.listen(0, () => process.send(server.address().port));`;
   const spans = traces.find((t) => t.url === '/pay').spans.filter((s) => s.kind === 'db');
   assert.deepEqual(spans.map((s) => s.name), ['BEGIN', 'update orders set paid = true', 'COMMIT', 'BEGIN', 'insert into audit values (1)', 'COMMIT', 'select * from orders where id = 1']);
   assert.ok(spans.at(-1).frames.length, 'the pool.query span keeps its code line');
+});
+
+test('value hashes are keyed per process, so they cannot be matched against guessed values', () => {
+  const privacy = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'recorder', 'privacy.cjs');
+  const hash = () => execFileSync(process.execPath, ['-e', `const p = require(${JSON.stringify(privacy)}); console.log(p.hashValues(['ada@example.com']), p.hashValues(['ada@example.com']))`], { encoding: 'utf8' }).trim().split(' ');
+  const [a1, a2] = hash();
+  const [b1] = hash();
+  assert.equal(a1, a2, 'stable within a process, so repeats are still found');
+  assert.notEqual(a1, b1, 'different in another process');
+  assert.notEqual(a1, createHash('sha1').update(JSON.stringify(['ada@example.com'])).digest('hex').slice(0, 12), 'not the plain hash anyone can compute');
 });

@@ -21,7 +21,7 @@ problems seen in real use (see WORKLOG.md), not wishes.
 | Replay payload | method, url, headers and body (≤ 64 KB) kept in dashboard memory only, for replays |
 | Index advisor | `EXPLAIN (GENERIC_PLAN)` on each distinct SELECT (Postgres 16+, never runs the query); flags sequential scans filtered on columns no index starts with, including the ORDER BY columns worth adding; sends the table's row estimate and each filter column's `n_distinct` from `pg_stats` |
 | Index create / drop | from the dashboard, through the app's own pool, from checked identifiers only; checks the plan can use it |
-| Privacy | values hashed; emails, IPs, UUIDs and long numbers masked in Redis keys; `AUTH`/`HELLO`/`ACL`/`CONFIG`/`MIGRATE` shown by name only |
+| Privacy | values hashed with a key made fresh per app process (HMAC-SHA-256); emails, IPs, UUIDs and long numbers masked in Redis keys; `AUTH`/`HELLO`/`ACL`/`CONFIG`/`MIGRATE` shown by name only |
 | Safety | off unless started by backlens; installed once; every patch swallows its own errors; framework assets (`/_next/`, Vite, favicons, source maps) ignored |
 
 ## 2. Analysis (pure)
@@ -34,6 +34,15 @@ problems seen in real use (see WORKLOG.md), not wishes.
 | Repeat | same statement (or Redis read) with the same values twice; grouped by where the code paths part | warn |
 | Serial | ≥ 2 reads from one function awaited back to back, not overlapping, no write between, no data dependency, same kind (cache-then-DB is left alone) | hint |
 | Missing index | advisor flagged a full-table read on a table of ≥ 1000 rows (smaller tables: no issue); hint instead of warn when every filter column holds ≤ 10 different values, with a partial-index suggestion | warn / hint |
+
+Every issue carries a confidence (`src/analysis/confidence.js`): *confirmed* / *likely* / *check*,
+with the evidence and the doubts. Evidence is merged across requests (a doubt in any request
+stays). A repeat is *check* when a copy has no code line, copies overlap in time, a write to the
+table came between, or it is seen in under half of 3+ requests. An N+1 is *confirmed* at 5+ calls
+with 5+ values from one line. A serial await is at best *likely*, and *check* without value
+fingerprints, when a call takes a lock, or after an empty result (a fallback). An index hint is
+*confirmed* at 10,000+ rows on a selective column, *check* on few-valued columns. CI never fails on
+*check* alone.
 
 Cost per issue is the median over the requests it was seen in (cold first requests no longer inflate
 it) and is worded as an estimate: serial is "up to ~N ms saved if run together".
@@ -103,6 +112,7 @@ run) and `backlens accept [route...]`, API `POST /api/behavior/diff|accept`, `GE
 | ✗ broken | 2xx/3xx → 4xx or 5xx; a field removed; a field's type changed; a new failing call |
 | ~ changed | more queries or a new statement; more Redis or outgoing calls; a new outgoing host; a new perf issue; a new field; slower (only with `--time`) |
 | ↑ better | fewer queries or calls; an issue gone; 4xx/5xx → 2xx; faster (only with `--time`) |
+| Reads that write | a GET that changed data when recorded (SQL writes, outgoing non-GET calls) is never replayed and is listed as skipped; a read that starts writing after a change is `~ now writes when read`; Redis writes from reads (caches, rate limits) do not count; writes nearly every request makes (≥ 80% of reads, ≥ 2 routes) are infrastructure, saved with the baseline |
 | Noise rules | an empty array or a null value hides its subtree (data drift); null ↔ type is not a type change; a status class change skips the other comparisons; time is opt-in, needs more than 2× and 10 ms with every run past every baseline run, is re-run to confirm, and is dropped when a third of the routes move together |
 
 ## 5c. Access broker (login profiles)
@@ -146,6 +156,17 @@ run) and `backlens accept [route...]`, API `POST /api/behavior/diff|accept`, `GE
 
 `scripts/eval/` (not shipped): runs tasks with and without backlens through `claude -p` in fresh
 worktrees, recording success, regressions shipped, tokens, cost and turns. No results yet.
+
+## 5f. Doctor
+
+`src/recorder/adapters.cjs`, `src/dashboard/doctor.js`; `backlens doctor [--json]` (exit 1 when an
+adapter is untested or shared), MCP `doctor`, an `adapters:` line in `status`.
+
+| Part | Detail |
+|---|---|
+| Adapters | reported by the recorder as it patches: http server, http client, fetch, pg, ioredis, node-redis, Prisma, Fastify, with versions; *untested* when the major version is not in the compatibility matrix; *shared* when the methods were already wrapped (shimmer `__wrapped`, OpenTelemetry, APM agents) at first sight |
+| Overhead | up to 2 recorded reads (no data writes), 4 warm-up pairs, then 12 alternating pairs with recording on (`x-backlens-replay`) and off (`x-backlens: skip`), timed from outside the app; medians with p25–p75; not counted as traffic |
+| Measured | oldmonk: +1.7–2.5 ms (17–31%) a request on light routes |
 
 ## Measurement (how a before → after is decided)
 

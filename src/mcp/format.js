@@ -14,7 +14,14 @@ export const costText = (i) => (i.type === 'serial' ? `up to ~${i.cost} ms saved
 
 export function issueText(i, n) {
   const lines = [`${n}. [${i.severity}] ${i.title}`, `   route: ${i.route}   seen in ${i.seen} of ${i.of} requests${i.cost ? `   ${costText(i)}` : ''}`];
+  if (i.confidence) {
+    const c = i.confidence;
+    lines.push(`   confidence: ${c.level}${c.why.length ? ` (${c.why.join('; ')})` : ''}`);
+    if (c.against.length) lines.push(`   doubts: ${c.against.join('; ')}`);
+  }
   if (i.sites && i.sites.length) lines.push(`   code: ${i.sites.join(' -> ')}`);
+  if (i.chain && i.chain.length > 1) lines.push(`   path: ${i.chain.join(' -> ')}`);
+  if (i.chains && i.chains.some((c) => c.length > 1)) i.chains.forEach((c, k) => lines.push(`   path ${k + 1}: ${c.join(' -> ')}`));
   if (i.sql) lines.push(`   calls:\n${indent(i.sql, '     ')}`);
   if (i.fix) lines.push(`   fix: ${i.fix}`);
   lines.push(`   example request: ${i.example}`);

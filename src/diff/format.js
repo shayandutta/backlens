@@ -26,6 +26,7 @@ export function diffText(d) {
     else lines.push('If these changes are intended, accept them so the next diff compares with the new behavior.');
   }
   if (d.note) lines.push('', d.note);
+  if (d.unverifiable) lines.push('', `${d.unverifiable} response field${d.unverifiable === 1 ? ' was' : 's were'} null in every baseline response, so only a missing field or a new type shows there, not a changed value. Use data where they are set to cover them.`);
   if (d.skipped && d.skipped.length) lines.push(...(lines.length > 1 ? [''] : []), ...d.skipped.map((s) => `not checked ${s.route}: ${s.why}`));
   return lines.join('\n');
 }

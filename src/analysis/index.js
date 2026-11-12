@@ -7,3 +7,4 @@ export { mapOf } from './map.js';
 export { routeOf, routeOfTrace } from './routes.js';
 export { isRead, keyGroup, normalizeSql, tablesOf } from './statements.js';
 export { summarize } from './summarize.js';
+export { ambientWrites, dataWrites, ownWrites, writeOf, writesOf } from './writes.js';

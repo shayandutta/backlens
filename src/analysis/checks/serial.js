@@ -1,5 +1,5 @@
 import { r1 } from '../../shared/stats.js';
-import { at, awaitedIn, where } from '../frames.js';
+import { at, awaitedIn, chainOf, where } from '../frames.js';
 import { isRead } from '../statements.js';
 
 /**
@@ -35,7 +35,16 @@ export function findSerial(io, covered) {
         sql: run.map((s) => s.name.slice(0, 80)).join('\n'),
         sites: [...new Set(run.map((s) => at((s.frames || []).find((x) => x.fn === f.fn && x.file === f.file))))],
         frames: [run[0].frames],
+        chain: chainOf(run[0].frames),
         cost: r1(sum(run) - Math.max(...run.map((s) => s.duration))),
+        // Whether backlens could check the calls do not feed each other (value fingerprints on both sides).
+        evidence: {
+          dependencyChecked: run.every((s) => Array.isArray(s.took) || Array.isArray(s.gave)),
+          // A call that takes a lock must come first: the others run under it on purpose.
+          lock: run.some((s) => /\bfor\s+(update|share|no\s+key\s+update)\b|pg_(try_)?advisory|\block\s+table\b/i.test(s.name)),
+          // An earlier call that found nothing: the later one may be a fallback that only runs then.
+          fallback: run.slice(0, -1).some((s) => s.rows === 0),
+        },
       });
     }
     run = [];

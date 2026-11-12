@@ -155,6 +155,10 @@
   .opt-card { cursor: default; } .opt-card > label { cursor: pointer; }
   .opt-card a { color: var(--accent); }
   a.btn { text-decoration: none; display: inline-block; }
+  .conf { border-radius: 4px; padding: 0 6px; font-size: 12px; }
+  .conf-confirmed { color: #4ade80; border: 1px solid #4ade8066; }
+  .conf-likely { color: #fbbf24; border: 1px solid #fbbf2466; }
+  .conf-check { color: var(--sub); border: 1px dashed var(--sub); }
   .compare-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 4px 0 14px; }
   .compare-card h4 { margin: 0 0 8px; font-size: 13px; }
   .compare-card table { width: auto; max-width: 100%; border-collapse: collapse; font: 13px var(--mono); margin-bottom: 10px; }
@@ -266,6 +270,7 @@
     <button role="tab" data-tab="issues" aria-selected="false">Issues<span class="count" id="issue-count" hidden></span></button>
     <button role="tab" data-tab="requests" aria-selected="false">Requests</button>
     <button role="tab" data-tab="tests" aria-selected="false">Tests<span class="count" id="test-count" hidden></span></button>
+    <button role="tab" data-tab="diff" aria-selected="false">Diff</button>
     <button role="tab" data-tab="compare" aria-selected="false">Compare</button>
     <button role="tab" data-tab="agents" aria-selected="false">Agents</button>
   </nav>
@@ -357,8 +362,11 @@ function renderIssues() {
       <div class="bar"></div>
       <div>
         <h3>${esc(i.title)}</h3>
-        <div class="meta"><span>${esc(i.route)}</span><span>seen in ${i.seen} of ${i.of} request${i.of === 1 ? '' : 's'}</span>${i.cost ? `<span>${i.type === 'serial' ? `up to ~${ms(i.cost)} saved if run together (estimate)` : `~${ms(i.cost)} repeated work each time`}</span>` : ''}</div>
+        <div class="meta"><span>${esc(i.route)}</span><span>seen in ${i.seen} of ${i.of} request${i.of === 1 ? '' : 's'}</span>${i.cost ? `<span>${i.type === 'serial' ? `up to ~${ms(i.cost)} saved if run together (estimate)` : `~${ms(i.cost)} repeated work each time`}</span>` : ''}${i.confidence ? `<span class="conf conf-${esc(i.confidence.level)}" title="${esc([...i.confidence.why, ...i.confidence.against.map((x) => `doubt: ${x}`)].join('\n'))}">${esc(i.confidence.level)}</span>` : ''}</div>
+        ${i.confidence && i.confidence.against.length ? `<div class="note">Doubts: ${esc(i.confidence.against.join('; '))}</div>` : ''}
         <div class="meta">${i.sites.map(siteLink).join('<span>→</span>')}</div>
+        ${i.chain && i.chain.length > 1 ? `<div class="note">Path: ${esc(i.chain.join(' → '))}</div>` : ''}
+        ${i.chains && i.chains.some((c) => c.length > 1) ? i.chains.map((c, k) => `<div class="note">Path ${k + 1}: ${esc(c.join(' → '))}</div>`).join('') : ''}
         <pre>${esc(i.sql)}</pre>
         <div class="fix"><b>Fix:</b> ${esc(i.fix)}</div>
         <div class="actions"><button class="ghost" type="button" data-ai-explain="issues:${idx}">Explain</button><button class="primary" type="button" data-ai-fix="issues:${idx}">Suggest fix</button>${i.type === 'index' && /CREATE INDEX[^;]*;/.test(i.fix) ? `<button class="ghost" type="button" data-copy="${esc(i.fix.match(/CREATE INDEX[^;]*;/)[0])}">Copy SQL</button>` : ''}<button class="link" type="button" data-trace="${esc(i.example)}" style="margin-top:0">Open a request with this issue →</button></div>
@@ -519,6 +527,40 @@ function siteLink(site, extra = '') {
 }
 
 function lineHtml(l) { return `<span class="${l.stream === 'err' ? 'err' : l.stream === 'sys' ? 'sys' : ''}">${esc(l.text)}</span>`; }
+
+// ---- the behavior diff: what a change did to every route --------------------------------
+let diffInfo = null;
+let diffBusy = false;
+let diffError = null;
+async function loadDiff() {
+  try { const r = await api('/api/behavior/last'); if (r.ok) diffInfo = await r.json(); } catch {}
+}
+const MARK = { broken: '✗', changed: '~', better: '↑' };
+function renderDiff() {
+  const b = diffInfo && diffInfo.baseline;
+  const d = diffInfo && diffInfo.last;
+  const run = `<button class="primary" type="button" data-diff-run ${diffBusy ? 'disabled' : ''}>${diffBusy ? 'Replaying routes…' : b ? 'Run diff' : 'Take baseline'}</button>`;
+  const intro = `<p class="muted">Replays one recorded request per route (up to 30; writes inside a rolled-back transaction) and compares it with the baseline: status, response fields and types, queries, calls, errors. Run it after a change to see what the change did to every route.</p>`;
+  if (!b) return `<div class="empty"><b>No baseline yet</b>Use the app's pages once, then take a baseline: later diffs compare with it.<div class="actions" style="justify-content:center">${run}</div></div>`;
+  let body = `<h2>Behavior diff</h2>${intro}<div class="actions" style="margin:0 0 14px">${run}<span class="muted" style="font-size:12px;align-self:center">Baseline: ${b.routes} route${b.routes === 1 ? '' : 's'}, taken ${new Date(b.at).toLocaleString()}</span></div>`;
+  if (diffError) body += `<div class="note">${esc(diffError)}</div>`;
+  if (!d) return body + `<div class="empty"><b>Not run yet in this session</b>Run a diff after changing code.</div>`;
+  const head = `${d.checked} route${d.checked === 1 ? '' : 's'} checked in ${(d.ms / 1000).toFixed(1)} s, ${new Date(d.at).toLocaleTimeString()}`;
+  if (!d.results.length) body += `<div class="empty"><b>No behavior change</b>${esc(head)}</div>`;
+  else {
+    const touched = d.results.map((r) => r.route);
+    body += `<p><b>${[d.broken && `${d.broken} broken`, d.changed && `${d.changed} changed`, d.better && `${d.better} better`].filter(Boolean).join(', ')}</b>: ${esc(head)}</p>`;
+    body += `<div class="actions" style="margin:0 0 14px"><button class="ghost" type="button" data-diff-accept="${esc(JSON.stringify(touched))}">Accept all ${touched.length} as intended</button></div>`;
+    body += d.results.map((r) => {
+      const worst = r.findings[0].kind;
+      return `<article class="issue ${worst === 'broken' ? 'warn' : 'hint'}"><div class="bar"></div><div><h3>${esc(r.route)}</h3>${r.findings.map((f) => `<div class="meta"><span class="conf conf-${f.kind === 'broken' ? 'check' : f.kind === 'better' ? 'confirmed' : 'likely'}">${MARK[f.kind]} ${esc(f.kind)}</span><span>${esc(f.what)}</span></div>`).join('')}<div class="actions"><button class="ghost" type="button" data-diff-accept="${esc(JSON.stringify([r.route]))}">Accept as intended</button></div></div></article>`;
+    }).join('');
+  }
+  if (d.note) body += `<div class="note">${esc(d.note)}</div>`;
+  if (d.unverifiable) body += `<div class="note">${d.unverifiable} response field${d.unverifiable === 1 ? ' was' : 's were'} null in every baseline response: only a missing field or a new type shows there.</div>`;
+  if (d.skipped && d.skipped.length) body += `<h3 style="margin-top:18px">Not checked</h3>` + d.skipped.map((x) => `<div class="meta"><span>${esc(x.route)}</span><span>${esc(x.why)}</span></div>`).join('');
+  return body;
+}
 
 function renderTests() {
   if (!cfg) return '';
@@ -822,7 +864,7 @@ function compareCard(j) {
     ${c.before.http || c.after.http ? row('outgoing http', c.before.http, c.after.http) : ''}
     <tr><th>status</th><td>${c.before.status}</td><td class="arrow">→</td><td class="${c.before.status === c.after.status ? 'same' : 'worse'}">${c.after.status}</td><td></td></tr>
     <tr><th>issue</th><td>found</td><td class="arrow">→</td><td class="${c.issueGone ? 'better' : 'worse'}">${c.issueGone ? 'gone' : 'still there'}</td><td></td></tr>
-  </table><p class="note">Before: ${c.beforeKind === 'recorded' ? `${c.beforeRuns} recorded request${c.beforeRuns === 1 ? '' : 's'} (may include cold ones, so time is not compared)` : `${c.beforeRuns} warm replay${c.beforeRuns === 1 ? '' : 's'} of the old code`}. After: ${c.afterRuns} replay${c.afterRuns === 1 ? '' : 's'}${c.warmed ? ', after warming the restarted app up' : ''}. Ranges are p25-p75. Query counts are exact; a time change counts only when the ranges do not overlap.</p></section>`;
+  </table><p class="note">Before: ${c.beforeKind === 'recorded' ? `${c.beforeRuns} recorded request${c.beforeRuns === 1 ? '' : 's'} (may include cold ones, so time is not compared)` : `${c.beforeRuns} warm replay${c.beforeRuns === 1 ? '' : 's'} of the old code`}. After: ${c.afterRuns} replay${c.afterRuns === 1 ? '' : 's'}${c.warmed ? ', after warming the restarted app up' : ''}. Times are local replays on this machine, not production latency; ranges are p25-p75. Query counts are exact; a time change counts only when the ranges do not overlap.</p></section>`;
 }
 
 // ---- creating a suggested index from the drawer ----------------------------------------
@@ -1045,7 +1087,7 @@ function render() {
   tc.textContent = newIssues;
   if (showSetup || (cfg && cfg.needsSetup)) { $('#view').innerHTML = renderSetup(); return; }
   if (tab === 'map') { $('#view').innerHTML = renderMap(); requestAnimationFrame(drawWires); return; }
-  $('#view').innerHTML = tab === 'routes' ? renderRoutes() : tab === 'issues' ? renderIssues() : tab === 'compare' ? renderCompare() : tab === 'agents' ? renderAgents() : tab === 'tests' ? renderTests() : renderRequests();
+  $('#view').innerHTML = tab === 'routes' ? renderRoutes() : tab === 'issues' ? renderIssues() : tab === 'compare' ? renderCompare() : tab === 'agents' ? renderAgents() : tab === 'tests' ? renderTests() : tab === 'diff' ? renderDiff() : renderRequests();
 }
 
 function renderDetail() {
@@ -1095,7 +1137,7 @@ async function openRequest(id) {
 
 document.addEventListener('click', (e) => {
   const t = e.target.closest('[data-tab]');
-  if (t) { tab = t.dataset.tab; if (tab !== 'requests') routeFilter = null; if (tab === 'compare') loadSnapshots().then(render); if (tab === 'agents') loadAgentUsage().then(render); render(); return; }
+  if (t) { tab = t.dataset.tab; if (tab !== 'requests') routeFilter = null; if (tab === 'compare') loadSnapshots().then(render); if (tab === 'agents') loadAgentUsage().then(render); if (tab === 'diff') loadDiff().then(render); render(); return; }
   if (e.target.closest('#snap-save')) {
     const name = $('#snap-name').value.trim() || 'snapshot-' + new Date().toISOString().slice(11, 19).replace(/:/g, '');
     api('/api/snapshot?name=' + encodeURIComponent(name), { method: 'POST' }).then(loadSnapshots).then(() => { compareTo = snapshots[0] && snapshots[0].name; render(); });
@@ -1208,6 +1250,22 @@ document.addEventListener('click', async (e) => {
     if (!res.ok) testError = (await res.json()).error || 'Could not start the tests.';
     testLines = []; testSeq = 0; if (testInfo) testInfo.report = null;
     render(); pollTests(true);
+    return;
+  }
+  const drun = e.target.closest('[data-diff-run]');
+  if (drun) {
+    diffBusy = true; diffError = null; render();
+    try { await aiPost('/api/behavior/diff', {}); } catch (err) { diffError = err.message; }
+    diffBusy = false; await loadDiff(); render();
+    return;
+  }
+  const dacc = e.target.closest('[data-diff-accept]');
+  if (dacc) {
+    try { await aiPost('/api/behavior/accept', { routes: JSON.parse(dacc.dataset.diffAccept) }); } catch (err) { diffError = err.message; }
+    await loadDiff();
+    // Accepted routes leave the list: they are the new normal.
+    if (diffInfo && diffInfo.last) { const done = new Set(JSON.parse(dacc.dataset.diffAccept)); diffInfo.last.results = diffInfo.last.results.filter((r) => !done.has(r.route)); }
+    render();
     return;
   }
   const acc = e.target.closest('[data-accept]');

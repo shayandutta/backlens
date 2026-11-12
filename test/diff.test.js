@@ -52,8 +52,9 @@ test('a lost field is broken; an extra query is a change; one fewer is better', 
 
 test('a new failing call and a new outgoing host are reported', () => {
   const f = compareFingerprints(base(), fp(200, [span('db', 'select * from a where id = $1', { error: true }), span('redis', 'GET k'), span('http', 'POST https://api.stripe.com/v1/charges')], { id: 1, name: 'x' }));
-  assert.deepEqual(f.map((x) => x.kind), ['broken', 'changed']);
-  assert.match(f[1].what, /new outgoing call to api\.stripe\.com/);
+  assert.deepEqual(f.map((x) => x.kind), ['broken', 'changed', 'changed']);
+  assert.match(f[1].what, /now writes when read: http POST api\.stripe\.com/, 'a POST from a read is a write');
+  assert.match(f[2].what, /new outgoing call to api\.stripe\.com/);
 });
 
 test('time counts only past 100% and 10 ms with every run beyond every baseline run', () => {
@@ -64,4 +65,11 @@ test('time counts only past 100% and 10 ms with every run beyond every baseline 
   const slow = compareFingerprints(at([5, 6, 7]), at([60, 61, 62]));
   assert.match(slow[0].what, /slower: 6 -> 61 ms/);
   assert.equal(slow[0].time, true, 'marked, so the diff can re-check or drop it');
+});
+
+test('the diff says how many fields it cannot verify (null in every baseline response)', async () => {
+  const { diffText } = await import('../src/diff/format.js');
+  const text = diffText({ checked: 3, results: [], skipped: [], ms: 600, unverifiable: 2 });
+  assert.match(text, /^No behavior change: 3 routes/);
+  assert.match(text, /2 response fields were null in every baseline response/);
 });
