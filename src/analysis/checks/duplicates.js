@@ -1,6 +1,6 @@
 import { r1 } from '../../shared/stats.js';
 import { at, splitSites, where } from '../frames.js';
-import { normalizeSql, REDIS_REPEATABLE_READS } from '../statements.js';
+import { normalizeSql, REDIS_REPEATABLE_READS, tablesOf } from '../statements.js';
 
 /**
  * Two checks that both look for one statement run several times in a request:
@@ -11,6 +11,10 @@ import { normalizeSql, REDIS_REPEATABLE_READS } from '../statements.js';
  */
 
 const sum = (list) => list.reduce((n, s) => n + s.duration, 0);
+const located = (spans) => spans.every((s) => s.frames && s.frames.length);
+// Two copies of one call that run at the same time are suspicious: an app awaits one before the
+// other far more often than it fires both at once, and a call recorded twice looks exactly like this.
+const overlapping = (spans) => spans.some((a, i) => spans.slice(i + 1).some((b) => a.start < b.start + b.duration && b.start < a.start + a.duration));
 
 export function findDuplicates(io) {
   const issues = [];
@@ -48,6 +52,7 @@ export function findDuplicates(io) {
         sites: [...new Set(list.map((s) => at(where(s))))],
         frames: [list[0].frames],
         cost: r1(sum(list) - Math.max(...list.map((s) => s.duration))),
+        evidence: { calls: list.length, distinct: distinct.size, sites: new Set(list.map((s) => at(where(s)))).size, located: located(list) },
       });
     }
   }
@@ -73,8 +78,17 @@ export function findDuplicates(io) {
     if (!byCause.has(key)) byCause.set(key, { sites, items: [] });
     byCause.get(key).items.push(r);
   }
+  // A write to a table between two reads of it means the second read may see new data.
+  const writes = io.filter((x) => x.kind === 'db' && tablesOf(x.name).write);
+  const writeBetween = (same) => {
+    const tables = new Set(tablesOf(same[0].name).tables);
+    const from = Math.min(...same.map((s) => s.start));
+    const to = Math.max(...same.map((s) => s.start));
+    return writes.some((w) => w.start > from && w.start < to && tablesOf(w.name).tables.some((t) => tables.has(t)));
+  };
   for (const { sites, items } of byCause.values()) {
     const calls = items.reduce((n, r) => n + r.same.length - 1, 0);
+    const spans = items.flatMap((r) => r.same);
     issues.push({
       type: 'repeat',
       severity: 'warn',
@@ -84,6 +98,7 @@ export function findDuplicates(io) {
       sites: [...new Set(sites)],
       frames: [items[0].same[0].frames, items[0].same[1].frames],
       cost: r1(items.reduce((n, r) => n + sum(r.same.slice(1)), 0)),
+      evidence: { located: located(spans), overlapping: items.some((r) => overlapping(r.same)), writeBetween: items.some((r) => writeBetween(r.same)) },
     });
   }
 

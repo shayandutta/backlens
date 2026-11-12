@@ -35,6 +35,15 @@ problems seen in real use (see WORKLOG.md), not wishes.
 | Serial | ≥ 2 reads from one function awaited back to back, not overlapping, no write between, no data dependency, same kind (cache-then-DB is left alone) | hint |
 | Missing index | advisor flagged a full-table read on a table of ≥ 1000 rows (smaller tables: no issue); hint instead of warn when every filter column holds ≤ 10 different values, with a partial-index suggestion | warn / hint |
 
+Every issue carries a confidence (`src/analysis/confidence.js`): *confirmed* / *likely* / *check*,
+with the evidence and the doubts. Evidence is merged across requests (a doubt in any request
+stays). A repeat is *check* when a copy has no code line, copies overlap in time, a write to the
+table came between, or it is seen in under half of 3+ requests. An N+1 is *confirmed* at 5+ calls
+with 5+ values from one line. A serial await is at best *likely*, and *check* without value
+fingerprints, when a call takes a lock, or after an empty result (a fallback). An index hint is
+*confirmed* at 10,000+ rows on a selective column, *check* on few-valued columns. CI never fails on
+*check* alone.
+
 Cost per issue is the median over the requests it was seen in (cold first requests no longer inflate
 it) and is worded as an estimate: serial is "up to ~N ms saved if run together".
 
