@@ -2,6 +2,7 @@ import { ambientWrites, checkTrace, dataWrites, ownWrites, routeOf } from '../..
 import { REPLAY, SAFE_METHODS } from '../../shared/replay-policy.js';
 import { compareTimings, timing } from '../../shared/compare.js';
 import { asRole } from '../../access/login.js';
+import { jwtExpired } from '../../access/token.js';
 import { record } from '../../evidence/ledger.js';
 import { json, readJson } from '../http.js';
 import { sandboxCheck } from '../sandbox-policy.js';
@@ -40,6 +41,10 @@ export default function measureRoutes({ root, store, replayer, fresh, ai, access
         const as = body && typeof body.as === 'string' && body.as ? body.as : null;
         let payload = path ? { method: 'GET', url: path, headers: {} } : store.replayOf(id);
         if (!payload) return json(res, 400, { error: ai() && ai().replayEnabled() ? 'This request cannot be replayed (its body was too large, or it was recorded before replay was on).' : 'Replay is off in AI settings.' });
+        if (!as && !path && jwtExpired(payload.headers)) {
+          const role = access.profiles.defaultName();
+          return json(res, 409, { error: `This request's recorded sign-in has expired.${role ? ` Pass as: "${role}" to sign in with the saved login.` : ' Save a login (save_login) or use the page again, then measure the new request.'}` });
+        }
         // Writes only in the sandbox: each replay's Postgres work is rolled back.
         const write = !SAFE_METHODS.includes(payload.method);
         let sandbox = null;

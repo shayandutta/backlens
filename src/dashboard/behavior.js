@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { asRole } from '../access/login.js';
+import { jwtExpired } from '../access/token.js';
 import { ambientWrites, dataWrites, routeOf } from '../analysis/index.js';
 import { compareFingerprints, RANK } from '../diff/compare.js';
 import { fingerprint } from '../diff/fingerprint.js';
@@ -187,15 +188,23 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
     const ambient = new Set([...ambientWrites(store.traces), ...(baseline.ambient || [])]);
     for (const e of entries) {
       let payload = payloadFor(e);
+      // The request held in memory may carry a sign-in that has expired by now. A JWT says so
+      // itself: then it is not sent at all (an optional-auth route would quietly answer as an
+      // anonymous user, and look "better").
+      const expired = payload && jwtExpired(payload.headers);
+      if (expired && !(access && (e.as || access.profiles.defaultName()))) {
+        skipped.push({ route: e.route, why: 'its recorded sign-in has expired; save a login (save_login) so backlens can sign in itself, or use the page again' });
+        continue;
+      }
       // A route taken as a role is always sent as that role; a signed-in route whose request is
-      // gone falls back to the default profile.
-      const role = access && (e.as || (!payload && e.authed ? access.profiles.defaultName() : null));
+      // gone (or whose sign-in expired) falls back to the default profile.
+      const role = access && (e.as || ((!payload || expired) && e.authed ? access.profiles.defaultName() : null));
       if (role) {
         try {
           payload = asRole(payload || { method: e.method, url: e.url, headers: {} }, await access.sessions.headersFor(role, { fresh: restarted && !signedIn.has(role) }));
           signedIn.add(role);
         } catch (err) {
-          if (!payload || e.as) {
+          if (!payload || e.as || expired) {
             skipped.push({ route: e.route, why: err.message });
             continue;
           }
@@ -254,10 +263,13 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
     fresh.markUsed(run);
     results.sort((a, b) => RANK[a.findings[0].kind] - RANK[b.findings[0].kind]);
     const count = (kind) => results.reduce((n, r) => n + r.findings.filter((f) => f.kind === kind).length, 0);
+    // Fields that were null in every baseline response: a change in their values cannot be seen.
+    const unverifiable = checked.reduce((n, c) => n + Object.values((c.e.fingerprint && c.e.fingerprint.shape) || {}).filter((t) => t === 'null').length, 0);
     record(root, 'diff', { checked: checked.length, broken: count('broken'), changed: count('changed'), better: count('better'), results, skipped: skipped.length, ms: Date.now() - started });
     return {
       checked: checked.length,
       note,
+      unverifiable,
       skipped,
       results,
       broken: count('broken'),

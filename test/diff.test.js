@@ -66,3 +66,10 @@ test('time counts only past 100% and 10 ms with every run beyond every baseline 
   assert.match(slow[0].what, /slower: 6 -> 61 ms/);
   assert.equal(slow[0].time, true, 'marked, so the diff can re-check or drop it');
 });
+
+test('the diff says how many fields it cannot verify (null in every baseline response)', async () => {
+  const { diffText } = await import('../src/diff/format.js');
+  const text = diffText({ checked: 3, results: [], skipped: [], ms: 600, unverifiable: 2 });
+  assert.match(text, /^No behavior change: 3 routes/);
+  assert.match(text, /2 response fields were null in every baseline response/);
+});
