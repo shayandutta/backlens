@@ -28,6 +28,7 @@ export function fingerprint(traces, ambient = new Set()) {
   const last = traces.at(-1);
   const spans = last.spans || [];
   return {
+    method: last.method,
     status: last.status,
     shape: last.shape || null,
     queries: countBy(spans.filter((s) => s.kind === 'db').map((s) => normalizeSql(s.name).slice(0, 200))),

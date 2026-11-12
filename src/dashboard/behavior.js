@@ -9,6 +9,7 @@ import { fingerprint } from '../diff/fingerprint.js';
 import { record } from '../evidence/ledger.js';
 import { projectDir } from '../shared/project-config.js';
 import { SAFE_METHODS } from '../shared/replay-policy.js';
+import { sandboxCheck } from './sandbox-policy.js';
 
 /**
  * The behavior diff: one representative read per route, replayed against the app as it runs now
@@ -23,6 +24,8 @@ import { SAFE_METHODS } from '../shared/replay-policy.js';
  */
 
 export const MAX_ROUTES = 30;
+/** Writes (POST, PUT, PATCH, DELETE) in the baseline at most; each is replayed in the rolled-back sandbox. */
+export const MAX_WRITES = 10;
 const WARMUPS = 1;
 const RUNS = 3;
 const ACCEPT_FRESH_MS = 10 * 60 * 1000;
@@ -70,6 +73,7 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
     const calls = new Map();
     const newest = new Map();
     const writing = new Map();
+    const newWrites = new Map();
     const ambient = ambientWrites(store.traces);
     for (let i = store.traces.length - 1; i >= 0; i--) {
       const t = store.traces[i];
@@ -77,7 +81,13 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
       calls.set(route, (calls.get(route) || 0) + 1);
       if (newest.has(route) || t.status >= 500) continue;
       const payload = store.replays.get(t.id);
-      if (!payload || !payload.url || !SAFE_METHODS.includes(payload.method)) continue;
+      if (!payload || !payload.url) continue;
+      if (!SAFE_METHODS.includes(payload.method)) {
+        // A write that worked, made only Postgres changes through pg and called nothing outside:
+        // it can be replayed inside a transaction that is rolled back.
+        if (t.status < 400 && !newWrites.has(route) && sandboxCheck(t).ok) newWrites.set(route, { route, payload });
+        continue;
+      }
       const writes = dataWrites(t, ambient);
       if (writes.length) {
         if (!writing.has(route)) writing.set(route, writes);
@@ -86,7 +96,9 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
       newest.set(route, { route, payload });
     }
     for (const r of newest.keys()) writing.delete(r);
-    const list = [...newest.values()].sort((a, b) => calls.get(b.route) - calls.get(a.route) || a.route.localeCompare(b.route)).slice(0, MAX_ROUTES);
+    const byCalls = (a, b) => calls.get(b.route) - calls.get(a.route) || a.route.localeCompare(b.route);
+    const writes = [...newWrites.values()].sort(byCalls).slice(0, MAX_WRITES);
+    const list = [...[...newest.values()].sort(byCalls).slice(0, MAX_ROUTES - writes.length), ...writes];
     return Object.assign(list, { writing });
   }
 
@@ -99,17 +111,30 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
       const p = store.replays.get(t.id);
       if (p && (p.url === entry.url || p.url.split('?')[0] === entry.url)) return p;
     }
+    // A write needs its body, which only the recorded request has.
+    if (!SAFE_METHODS.includes(entry.method)) return null;
     return entry.authed ? null : { method: entry.method, url: entry.url, headers: {} };
   }
 
-  /** Replays a request: one warm-up, then RUNS runs. { traces } or { skip }. */
+  /**
+   * Replays a request: one warm-up, then RUNS runs. { traces } or { skip }, or for a write
+   * { breach } when the sandbox did not hold (a query outside the transaction, a failed rollback).
+   */
   async function replay(payload, port) {
+    const write = !SAFE_METHODS.includes(payload.method);
+    const headers = write ? { ...SHAPE_HEADERS, 'x-backlens-sandbox': '1' } : SHAPE_HEADERS;
     const id = randomUUID();
-    for (let i = 0; i < WARMUPS; i++) await replayer.send(payload, port, id, SHAPE_HEADERS);
+    const sent = [];
+    for (let i = 0; i < WARMUPS; i++) sent.push(await replayer.send(payload, port, id, headers));
     const all = [];
     for (let i = 0; i < RUNS; i++) {
-      const t = await replayer.send(payload, port, id, SHAPE_HEADERS);
+      const t = await replayer.send(payload, port, id, headers);
+      sent.push(t);
       if (t) all.push(t);
+    }
+    if (write) {
+      const bad = sent.filter(Boolean).find((t) => !t.sandbox || t.sandbox.leaked || !t.sandbox.rolledBack || t.sandbox.error);
+      if (bad) return { breach: !bad.sandbox ? 'the recorder in the app does not support the sandbox' : bad.sandbox.leaked ? `${bad.sandbox.leaked} queries ran outside the rolled-back transaction` : bad.sandbox.error || 'a rollback did not complete' };
     }
     if (!all.length) return { skip: 'did not answer in time' };
     const ok = all.filter((t) => t.status !== 429);
@@ -117,6 +142,9 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
     const status = ok.at(-1).status;
     return { traces: ok.filter((t) => t.status === status) };
   }
+
+  /** Stops write replays for the rest of a run after a breach, and says so loudly. */
+  const breachNote = (route, why) => ({ route, why: `WARNING: the write sandbox did not hold (${why}); writes may have reached the database. No more writes are replayed in this run.` });
 
   /** Takes the baseline for `routes` (all candidates when null), keeping other entries. */
   async function capture(routes = null) {
@@ -133,8 +161,15 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
     const skipped = [...all.writing].filter(([r]) => !routes || routes.includes(r)).map(([route, w]) => ({ route, why: `it changes data when requested (${w.slice(0, 2).join(', ')}), so it is not replayed` }));
     const entries = new Map((old ? old.entries : []).map((e) => [e.route, e]));
     const ambient = new Set([...ambientWrites(store.traces), ...((old && old.ambient) || [])]);
+    let writesOff = false;
     for (const c of picked) {
+      if (writesOff && !SAFE_METHODS.includes(c.payload.method)) continue;
       const r = await replay(c.payload, port);
+      if (r.breach) {
+        skipped.push(breachNote(c.route, r.breach));
+        writesOff = true;
+        continue;
+      }
       if (r.skip) {
         skipped.push({ route: c.route, why: r.skip });
         continue;
@@ -185,6 +220,7 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
     const skipped = [];
     const checked = [];
     const signedIn = new Set();
+    let writesOff = false;
     const ambient = new Set([...ambientWrites(store.traces), ...(baseline.ambient || [])]);
     for (const e of entries) {
       let payload = payloadFor(e);
@@ -214,7 +250,16 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
         skipped.push({ route: e.route, why: 'signed-in route and its request is no longer in memory: use the page once in the app, or save a login profile (save_login)' });
         continue;
       }
+      if (writesOff && !SAFE_METHODS.includes(payload.method)) {
+        skipped.push({ route: e.route, why: 'not replayed after the sandbox did not hold earlier in this run' });
+        continue;
+      }
       let r = await replay(payload, port);
+      if (r.breach) {
+        skipped.push(breachNote(e.route, r.breach));
+        writesOff = true;
+        continue;
+      }
       if (r.skip) {
         skipped.push({ route: e.route, why: r.skip });
         continue;
