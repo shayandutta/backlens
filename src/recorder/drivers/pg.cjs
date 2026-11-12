@@ -9,6 +9,7 @@ const { begin } = require('../context.cjs');
 const { appFrames } = require('../frames.cjs');
 const { maybeAdvise, usePool } = require('../index-advisor.cjs');
 const { hashValues, paramPrints, resultPrints } = require('../privacy.cjs');
+const sandbox = require('../sandbox.cjs');
 
 let insidePool = false;
 
@@ -24,7 +25,7 @@ function recordQuery(original, self, args) {
   const text = typeof config === 'string' ? config : config && config.text;
   if (typeof text !== 'string') return original.apply(self, args);
   const params = typeof config === 'object' && config.values !== undefined ? config.values : Array.isArray(values) ? values : undefined;
-  const end = begin('db', text.replace(/\s+/g, ' ').trim().slice(0, 600), { params: hashValues(params), took: paramPrints(params) });
+  const end = begin('db', text.replace(/\s+/g, ' ').trim().slice(0, 600), { params: hashValues(params), took: paramPrints(params), drv: 'pg' });
   if (!end) return original.apply(self, args);
   const done = (res) => {
     end({ rows: res ? (res.rowCount ?? (res.rows ? res.rows.length : undefined)) : undefined, gave: res ? resultPrints(res.rows) : undefined });
@@ -73,20 +74,58 @@ function recordQuery(original, self, args) {
 function patchPg(pg) {
   const Client = pg && pg.Client;
   const Pool = pg && pg.Pool;
+  const rawClientQuery = Client && Client.prototype.query;
   if (Client && !Client.prototype.__backlens) {
     Client.prototype.__backlens = true;
     const query = Client.prototype.query;
     Client.prototype.query = function () {
+      let args = [...arguments];
+      // In a write sandbox: the pinned connection runs the app's transaction statements as
+      // savepoints; any other connection used by this request is a leak the dashboard reports.
+      const sb = sandbox.current();
+      if (sb && !insidePool && !sb.closed) {
+        if (this === sb.client) {
+          sb.statements++;
+          args = sandbox.rewriteArgs(sb, args);
+        } else sb.leaked++;
+      }
       // Called by the pool, not the app: either synchronously inside pool.query, or later with no app code on the stack.
-      if (insidePool || appFrames().length === 0) return query.apply(this, arguments);
-      return recordQuery(query, this, [...arguments]);
+      if (insidePool || appFrames().length === 0) return query.apply(this, args);
+      return recordQuery(query, this, args);
     };
   }
   if (Pool && !Pool.prototype.__backlens) {
     Pool.prototype.__backlens = true;
     const query = Pool.prototype.query;
+    const connect = Pool.prototype.connect;
+    Pool.prototype.connect = function (cb) {
+      const sb = sandbox.current();
+      if (!sb) return connect.apply(this, arguments);
+      // The request's pinned connection, lent out; release() keeps it open for the rollback.
+      const p = sandbox.pinned(sb, this, connect, rawClientQuery).then(sandbox.lease);
+      if (typeof cb !== 'function') return p;
+      p.then((c) => cb(null, c, () => {}), (err) => cb(err));
+      return undefined;
+    };
     Pool.prototype.query = function () {
       usePool(this);
+      const sb = sandbox.current();
+      if (sb) {
+        const pool = this;
+        // The same recording, but the query runs on the pinned connection inside the transaction.
+        const pinnedQuery = function (...a) {
+          const cbIndex = a.findIndex((x) => typeof x === 'function');
+          const cb = cbIndex === -1 ? null : a.splice(cbIndex, 1)[0];
+          const p = sandbox.pinned(sb, pool, connect, rawClientQuery).then((c) => {
+            sb.statements++;
+            return rawClientQuery.apply(c, sandbox.rewriteArgs(sb, a));
+          });
+          if (!cb) return p;
+          p.then((res) => cb(null, res), (err) => cb(err));
+          return undefined;
+        };
+        return recordQuery(pinnedQuery, this, [...arguments]);
+      }
       const original = function () {
         insidePool = true;
         try {

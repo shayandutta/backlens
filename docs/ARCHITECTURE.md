@@ -33,6 +33,9 @@ bin/backlens.js            CLI entry: parses args, dispatches to src/cli/*
 statusline.js              stable entry for `backlens statusline` (installed paths point here)
 src/
   cli/                     one module per subcommand: studio, ci, diff (+ accept), statusline; args + help
+  harness/                 agent adapters: init <claude|codex|cursor>, the stop hook (verification gate)
+  access/                  login profiles (${env:NAME} refs), signing in as a role, .env lookup
+  evidence/                ledger (.backlens/evidence.jsonl) and the PR report
   recorder/   (CommonJS)   runs inside the app
     index.cjs              entry (`backlens/register`): installs patches once, only if BACKLENS_URL
     env.cjs                what the dashboard passes through the environment
@@ -42,6 +45,7 @@ src/
     transport.cjs          reports to the dashboard; token check
     incoming.cjs           http/https servers: one trace per request, replay payload
     shape.cjs              JSON response shape (paths and types, no values), on replays that ask
+    sandbox.cjs            write sandbox: pinned pg connection, savepoints, rollback after the response
     index-advisor.cjs      EXPLAIN (GENERIC_PLAN) advice; create/drop the suggested index
     loader.cjs             patches libraries as they load (CJS hook + ESM via shared cache)
     drivers/               pg, redis (ioredis + node-redis), prisma, outgoing (http/https/fetch)
@@ -61,9 +65,10 @@ src/
     replay.js              replay a recorded request and wait for its trace; measure (warm-up until stable)
     fresh.js               fresh app runs: restart before measuring when the run is used
     behavior.js            behavior diff: baseline per route, replay, compare, accept
+    sandbox-policy.js      which recorded writes may be replayed in the sandbox
     runner.js              one child process tree and its output
     test-report.js, app-command.js, http.js
-    routes/                ingest, traffic, project, measure, behavior, indexes, ai
+    routes/                ingest, traffic, project, measure, behavior, access, indexes, ai
     ui.html                the dashboard page: one file, no build
   ai/                      Explain and Fix
     index.js               createAI(deps): status, explain, keys, fix jobs
@@ -89,7 +94,9 @@ scripts/check-syntax.mjs   `npm run check`: parses every file
 Arrows point from a layer to what it may import.
 
 ```
+cli ─▶ harness ─▶ mcp (session), diff, evidence
 cli ─▶ dashboard ─▶ ai ─▶ analysis ─▶ shared
+        dashboard ─▶ access, evidence
  │        │          │
  │        ├────────▶ diff ─▶ analysis
  │        ├────────▶ report ─▶ analysis
@@ -118,7 +125,10 @@ These paths are used outside this repo and must not move:
 | dashboard HTTP API `/api/*`, `/ingest`, `/advice`, `/routes`, `/listening` | `ui.html`, `backlens mcp`, the recorder |
 | `backlens.baseline.json` and `stableKey` | committed by users for CI |
 | `.backlens/behavior.json` `{ version: 1, at, entries: [{ route, method, path, url, authed, fingerprint, at }] }`, mode 600, no headers or values | `backlens diff` of another version |
-| replay headers `x-backlens-replay`, `x-backlens-shape: 1` | the recorder inside the app (may be another version) |
+| replay headers `x-backlens-replay`, `x-backlens-shape: 1`, `x-backlens-sandbox: 1` | the recorder inside the app (may be another version) |
+| `.backlens/profiles.json` `{ default, profiles: { name: { login: { method, url, headers, body } } } }`, secrets only as `${env:NAME}` | users may write it by hand |
+| `.backlens/evidence.jsonl`, one `{ at, kind, ... }` per line (`diff`, `measure`, `accept`, `baseline`, `hook`) | `backlens report` of another version |
+| hook commands `backlens hook stop [--harness ...]` | `.claude/settings.json`, `.codex/hooks.json`, `.cursor/hooks.json` written by `init` |
 
 ## Conventions
 

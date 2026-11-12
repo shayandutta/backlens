@@ -126,10 +126,16 @@ New:
 | 0 ✅ | Modular refactor, docs, CI | 60 tests pass; identical e2e output on a real API |
 | 1 ✅ | Fix the credibility gaps (FEATURES.md "Known gaps", fixed list) | measure compares warm median vs warm median; index hints skip tiny tables and covered filters; `status` shows MCP and recorder versions and warns on mismatch; README pins `@latest` |
 | 2 ✅ | Behavior diff MVP: baseline, fingerprints, diff engine, `backlens diff` CLI + MCP `diff`/`accept` | catches a seeded break (500, shape change, extra query) on a real app in < 5 s for 30 routes; < 1 false alarm per 10 clean runs |
-| 3 | Access broker: login profiles, replay as role, replayable test traffic | an agent measures a signed-in route with zero setup calls |
-| 4 | Harness: `backlens init claude` (Stop-hook gate, MCP config), accept flow | the hook blocks a broken turn and the agent fixes it unaided |
-| 5 | Proof: eval of 20–30 real tasks on 3+ apps, with and without backlens | published numbers: tokens per task, task success, regressions shipped, false alarms |
-| 6 (v2) | Write sandbox, PR evidence report, Cursor/Codex adapters, Next.js full-stack | — |
+| 3 ✅ | Access broker: login profiles, replay as role, replayable test traffic | an agent measures a signed-in route with zero setup calls |
+| 4 ◐ | Harness: `backlens init claude` (Stop-hook gate, MCP config), accept flow | the hook blocks a broken turn and the agent fixes it unaided |
+| 5 ◐ | Proof: eval of 20–30 real tasks on 3+ apps, with and without backlens | published numbers: tokens per task, task success, regressions shipped, false alarms |
+| 6 ◐ | Write sandbox, PR evidence report, Cursor/Codex adapters, Next.js full-stack | — |
+
+Phase 4 ◐: the hook blocked a real break from a real agent run, and the agent reacted unaided
+(it accepted, since the change was intended). A run where the agent must fix an unintended break
+is still to do. Phase 5 ◐: eval harness built, no runs. Phase 6 ◐: write sandbox (pg, measure
+only), PR report, Codex and Cursor hooks; not Next.js full-stack or sandboxed writes in `diff`.
+See WORKLOG 2026-11-12.
 
 Phase 1 comes first because the diff verdicts rely on the same measurement. If backlens overclaims
 there, users will stop believing its verdicts.

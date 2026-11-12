@@ -1,6 +1,8 @@
 import { relative } from 'node:path';
 import { agentUsage, usageText } from '../agent-usage/index.js';
 import { acceptText, diffText } from '../diff/format.js';
+import { readLedger } from '../evidence/ledger.js';
+import { reportMarkdown } from '../evidence/report.js';
 import { timingText } from '../shared/compare.js';
 import { ago, issueText, ms, plural, traceText } from './format.js';
 import { api, findSessions, NOT_RUNNING } from './session.js';
@@ -17,11 +19,15 @@ export async function call(name, args, cwd) {
   const session = sessions[0];
   // Read from Claude Code's own logs, so it works with the dashboard closed too.
   if (name === 'usage') return usageText(await agentUsage({ root: session ? session.root : cwd }), { current: true });
+  if (name === 'report') {
+    const hours = Number(args.hours) || 24;
+    return reportMarkdown(readLedger(session ? session.root : cwd, Date.now() - hours * 3600 * 1000), { hours });
+  }
   if (!session) throw new Error(NOT_RUNNING);
   const where = relative(cwd, session.root) || '.';
 
   if (name === 'status') {
-    const [state, appInfo, config] = await Promise.all([api(session, 'GET', '/api/state'), api(session, 'GET', '/api/app?since=999999999'), api(session, 'GET', '/api/config')]);
+    const [state, appInfo, config, access] = await Promise.all([api(session, 'GET', '/api/state'), api(session, 'GET', '/api/app?since=999999999'), api(session, 'GET', '/api/config'), api(session, 'GET', '/api/access').catch(() => ({ profiles: [] }))]);
     // The recorder runs from the dashboard's package; this MCP server may be another install
     // (npx caches each version), and an older one misreads newer answers.
     const recorder = config.version || session.version || 'an older version (it does not report one)';
@@ -32,6 +38,7 @@ export async function call(name, args, cwd) {
       `recorded: ${plural(state.total, 'request')} on ${state.routes.filter((r) => r.calls).length} of ${state.routes.length} routes`,
       `issues: ${state.issues.length}${state.issues.length ? ` (${state.issues.filter((i) => i.severity === 'warn').length} worth fixing first)` : ''}`,
       `tests: ${config.config && config.config.test ? `\`${config.config.test}\` script` : 'no test script picked'}`,
+      `logins: ${access.profiles.length ? access.profiles.map((p) => `${p.name}${p.name === access.default ? ' (default)' : ''}${p.sessionOnly ? ' (this session)' : ''}`).join(', ') : 'none saved (save_login from a recorded sign-in request)'}`,
     ];
     if (recorder !== VERSION)
       lines.push(
@@ -52,7 +59,7 @@ export async function call(name, args, cwd) {
     const { report } = await api(session, 'GET', '/api/tests?since=999999999');
     const fromTests = report ? pick(report.issues) : [];
     if (fromTests.length)
-      return `${plural(fromTests.length, 'issue')} in the last test run's traffic (${plural(report.requests, 'request')}), worst first. Their example requests came from tests: get_request reads them; measure_request needs a request recorded from the running app.\n\n${fromTests.map((i, n) => `${issueText(i, n + 1)}${i.isNew ? '\n   new: not in backlens.baseline.json' : ''}`).join('\n\n')}`;
+      return `${plural(fromTests.length, 'issue')} in the last test run's traffic (${plural(report.requests, 'request')}), worst first. Their example requests came from tests: get_request reads them, and measure_request replays them against the running app.\n\n${fromTests.map((i, n) => `${issueText(i, n + 1)}${i.isNew ? '\n   new: not in backlens.baseline.json' : ''}`).join('\n\n')}`;
     if (total || report) return `No issues${args.route ? ` on ${args.route}` : ''} in ${plural(total, 'recorded request')}${report ? ` or in the last test run (${plural(report.requests, 'request')})` : ''}.`;
     return 'Nothing recorded yet: use the app, or call run_tests, so backlens sees real requests.';
   }
@@ -68,10 +75,11 @@ export async function call(name, args, cwd) {
   }
 
   if (name === 'list_requests') {
-    const { recent } = await api(session, 'GET', '/api/state');
+    const { recent, tests = [] } = await api(session, 'GET', '/api/state');
     const limit = Math.min(100, Math.max(1, Number(args.limit) || 20));
-    const list = (args.route ? recent.filter((r) => r.route === args.route) : recent).slice(0, limit);
-    if (!list.length) return 'No requests recorded yet.';
+    const from = args.from === 'tests' ? tests : recent;
+    const list = (args.route ? from.filter((r) => r.route === args.route) : from).slice(0, limit);
+    if (!list.length) return args.from === 'tests' ? 'No requests from a test run yet: call run_tests.' : 'No requests recorded yet.';
     return list.map((r) => `${r.id}  ${r.method} ${r.url}  ${r.status}  ${ms(r.duration)}  ${plural(r.spans, 'call')}${r.afterFix ? '  (after a kept fix)' : ''}`).join('\n');
   }
 
@@ -86,10 +94,10 @@ export async function call(name, args, cwd) {
   if (name === 'measure_request' || name === 'measure_url') {
     if (name === 'measure_request' && typeof args.id !== 'string') throw new Error('Give a request id from list_requests.');
     if (name === 'measure_url' && typeof args.url !== 'string') throw new Error('Give a path on the app, like /v1/reviews.');
-    const m = await api(session, 'POST', '/api/measure', name === 'measure_url' ? { url: args.url, runs: args.runs } : { id: args.id, runs: args.runs });
+    const m = await api(session, 'POST', '/api/measure', name === 'measure_url' ? { url: args.url, runs: args.runs, as: args.as } : { id: args.id, runs: args.runs, as: args.as, sandbox: args.sandbox === true });
     const row = (label, x) =>
       x ? `${label.padEnd(20)} ${timingText(x).padStart(26)}   ${String(x.queries).padStart(3)} queries  ${String(x.redis).padStart(3)} redis  ${String(x.http).padStart(3)} http   status ${x.status}` : `${label.padEnd(20)} none`;
-    const out = [`${m.route}${name === 'measure_url' ? `  (plain GET ${args.url}, no cookies)` : ''}`, '', `${''.padEnd(20)} ${'median (p25-p75, runs)'.padStart(26)}`];
+    const out = [`${m.route}${m.as ? `  (signed in as ${m.as})` : name === 'measure_url' ? `  (plain GET ${args.url}, no cookies)` : ''}`, '', `${''.padEnd(20)} ${'median (p25-p75, runs)'.padStart(26)}`];
     if (m.previous) {
       out.push(row('measured before', m.previous), row('now', m.now));
       const dq = m.now.queries - m.previous.queries;
@@ -101,11 +109,27 @@ export async function call(name, args, cwd) {
       if (m.recorded) out.push(row('recorded traffic', m.recorded), '(recorded traffic includes cold requests, so it is not compared)');
       out.push('', 'First measurement of this request: saved. Change the code, then measure it again to compare warm against warm.');
     }
+    if (m.sandbox) {
+      if (m.sandbox.contained) out.push('', `Sandbox: every run's ${m.sandbox.statements} Postgres statements were rolled back.${m.sandbox.redisWrites.length ? ` Not undone: Redis ${m.sandbox.redisWrites.join(', ')}.` : ''}`);
+      else out.push('', `WARNING: the sandbox did not hold: ${m.sandbox.leaked ? `${m.sandbox.leaked} queries ran on a connection outside the transaction` : m.sandbox.error}. Writes may have reached the database.`);
+    }
     if (m.otherStatuses) out.push('', `${m.otherStatuses.runs} of ${m.otherStatuses.of} runs answered ${m.otherStatuses.statuses.join(', ')} instead of ${m.now.status} and were left out${m.otherStatuses.statuses.includes(429) ? ' (rate limited)' : ''}.`);
     if (m.restarted) out.push('', 'backlens restarted the app first, so this run is measured fresh like the one it is compared with.');
     out.push('', m.issues.length ? `Issues still in the replayed request:\n${m.issues.map((i, n) => `${n + 1}. ${i.title}${i.sites && i.sites.length ? `  (${i.sites.join(' -> ')})` : ''}`).join('\n')}` : 'No issues in the replayed request.');
     out.push('', 'Query counts are exact. Times are warm medians; a change counts only when it is at least 1 ms and the p25-p75 ranges do not overlap.', '', 'Last replay:', traceText(m.trace));
     return out.join('\n');
+  }
+
+  if (name === 'save_login') {
+    const r = await api(session, 'POST', '/api/access/save', { name: args.name, id: args.id, default: args.default === true });
+    const lines = [
+      r.sessionOnly
+        ? `Saved "${r.name}" for this session only: no .env variable holds its ${r.missing.join(', ')}, so it is kept in memory and never written. Put the value in .env and save again to keep it.`
+        : `Saved "${r.name}" in ${relative(cwd, r.file) || r.file}; its secrets are references to .env variables, not values.`,
+      r.signedIn ? `Signing in as ${r.name} works. Use as: "${r.name}" with measure_url, measure_request and diff.` : `Signing in did not work yet: ${r.why}`,
+      `Profiles: ${r.profiles.map((p) => `${p.name}${p.name === r.default ? ' (default)' : ''}`).join(', ')}`,
+    ];
+    return lines.join('\n');
   }
 
   if (name === 'diff') return diffText(await api(session, 'POST', '/api/behavior/diff', { route: args.route, time: args.time === true }).catch(passError));

@@ -1,0 +1,28 @@
+{
+  "tasks": [
+    {
+      "id": "oldmonk-perf",
+      "repo": "../oldmonk",
+      "ref": "34e717a",
+      "appDir": "apps/api",
+      "setup": "pnpm install --frozen-lockfile --prefer-offline",
+      "backlensConfig": { "app": "dev", "test": "test", "autoRestart": true },
+      "traffic": "curl -s localhost:$APP_PORT/v1/reviews > /dev/null; curl -s localhost:$APP_PORT/v1/courses/backend-engineering-bible-vol-2 > /dev/null",
+      "prompt": "Find and fix the performance issues in the API in apps/api. Keep behavior the same.",
+      "check": "cd apps/api && pnpm test",
+      "maxTurns": 40
+    },
+    {
+      "id": "oldmonk-user-plan-field",
+      "repo": "../oldmonk",
+      "ref": "34e717a",
+      "appDir": "apps/api",
+      "setup": "pnpm install --frozen-lockfile --prefer-offline",
+      "backlensConfig": { "app": "dev", "test": "test", "autoRestart": true },
+      "traffic": "curl -s localhost:$APP_PORT/v1/reviews > /dev/null; curl -s localhost:$APP_PORT/v1/courses/backend-engineering-bible-vol-2 > /dev/null",
+      "prompt": "In apps/api, rename the user field emailVerified to isEmailVerified in the auth module's types and code.",
+      "check": "cd apps/api && pnpm test",
+      "maxTurns": 40
+    }
+  ]
+}

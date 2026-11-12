@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import { join } from 'node:path';
+import { projectEnv } from '../access/env.js';
+import { createSessions } from '../access/login.js';
+import { createProfiles } from '../access/profiles.js';
 import { createAI } from '../ai/index.js';
 import { packageManager, readProject } from '../shared/project.js';
 import { loadConfig, projectDir } from '../shared/project-config.js';
@@ -9,6 +12,7 @@ import { createFreshness } from './fresh.js';
 import { accessChecks, json } from './http.js';
 import { createProcesses } from './processes.js';
 import { createReplayer } from './replay.js';
+import accessRoutes from './routes/access.js';
 import aiRoutes from './routes/ai.js';
 import behaviorRoutes from './routes/behavior.js';
 import indexRoutes from './routes/indexes.js';
@@ -56,8 +60,11 @@ export function startServer({ port, root = process.cwd(), token, manualArgv = nu
     ai: () => ai,
   };
   ctx.fresh = createFreshness({ store, procs: ctx.procs });
-  ctx.behavior = createBehavior({ root, store, replayer, fresh: ctx.fresh });
-  const routes = [ingestRoutes, trafficRoutes, projectRoutes, measureRoutes, behaviorRoutes, indexRoutes, aiRoutes].flatMap((make) => make(ctx));
+  const profiles = createProfiles(root);
+  ctx.access = { profiles, env: () => projectEnv(root), sessions: null };
+  ctx.access.sessions = createSessions({ profiles, env: ctx.access.env, appPort: () => (procs ? procs.appPort() : null) });
+  ctx.behavior = createBehavior({ root, store, replayer, fresh: ctx.fresh, access: ctx.access });
+  const routes = [ingestRoutes, trafficRoutes, projectRoutes, measureRoutes, behaviorRoutes, accessRoutes, indexRoutes, aiRoutes].flatMap((make) => make(ctx));
 
   function match(req, pathname) {
     for (const r of routes) {

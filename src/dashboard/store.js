@@ -16,6 +16,8 @@ export function createStore() {
   const advice = new Map();
   // Trace id -> the request itself (method, url, headers, body), for replaying it.
   const replays = new Map();
+  // The same for requests the tests made, so measure_request works on a test-run request too.
+  const testReplays = new Map();
   // Issue key -> when its fix was kept, and 'route:<route>' -> when code behind it changed (see summarize).
   const fixedAt = new Map();
   // Issue key -> the index created for it from the dashboard, so Undo still knows it.
@@ -31,6 +33,7 @@ export function createStore() {
     known,
     advice,
     replays,
+    testReplays,
     fixedAt,
     createdIndexes,
     measured,
@@ -50,10 +53,14 @@ export function createStore() {
       if (traces.length > KEEP) replays.delete(traces.shift().id);
     },
 
-    addTestTrace(trace) {
+    addTestTrace(trace, replay = null) {
       testRun.traces.push(trace);
-      if (testRun.traces.length > KEEP_TEST) testRun.traces.shift();
+      if (replay) testReplays.set(trace.id, replay);
+      if (testRun.traces.length > KEEP_TEST) testReplays.delete(testRun.traces.shift().id);
     },
+
+    /** The request behind a recorded trace (app or test traffic), for replaying it; null if not kept. */
+    replayOf: (id) => replays.get(id) || testReplays.get(id) || null,
 
     findTrace: (id) => traces.find((t) => t.id === id) || testRun.traces.find((t) => t.id === id),
 

@@ -16,8 +16,9 @@ export default function ingestRoutes({ store, replayer, procs, ai }) {
             replayer.onTrace(trace);
             return noContent(res);
           }
-          if (trace.source === 'test') store.addTestTrace(trace);
-          else store.addTrace(trace, replay && !replay.truncated && ai() && ai().replayEnabled() ? replay : null);
+          const keep = replay && !replay.truncated && ai() && ai().replayEnabled() ? replay : null;
+          if (trace.source === 'test') store.addTestTrace(trace, keep);
+          else store.addTrace(trace, keep);
         }
         return noContent(res);
       },

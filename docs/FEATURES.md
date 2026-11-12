@@ -1,4 +1,4 @@
-# What backlens does today (v0.5.0)
+# What backlens does today (v0.5.0 + unreleased phases 1–6)
 
 An inventory of every feature and capability in the code, with where it lives. "Known gaps" are
 problems seen in real use (see WORKLOG.md), not wishes.
@@ -78,11 +78,13 @@ after a kept fix until a request on the new code shows them again.
 |---|---|
 | `status` | recording?, app state, traffic and issue counts; recorder and MCP versions, with a warning and the fix when they differ |
 | `list_issues` | issues worst first with route, `file:line`, statements, fix, example; falls back to the last test run |
-| `list_routes`, `list_requests` | route stats; recent requests with ids |
+| `list_routes`, `list_requests` | route stats; recent requests with ids (`from: "tests"` for the last test run) |
 | `get_request` | waterfall of one request with code per call |
-| `measure_request` | replay a recorded GET with its headers (works for signed-in routes) on a fresh app run; median with p25–p75; compared with the last measurement of the same request: faster / slower / within noise; issues still present |
+| `measure_request` | replay a recorded GET (app or test traffic; `as` a role; writes with `sandbox: true`, see 5d) with its headers (works for signed-in routes) on a fresh app run; median with p25–p75; compared with the last measurement of the same request: faster / slower / within noise; issues still present |
 | `measure_url` | the same for a plain GET to a path, no headers |
 | `app_logs`, `restart_app`, `run_tests` | app output; restart and wait for the port; tests with their issues |
+| `save_login` | save how to sign in as a role from a recorded sign-in request (see 5c) |
+| `report` | Markdown evidence for a PR (see 5e) |
 | `diff` | behavior diff of every baseline route (see 5b) |
 | `accept` | take routes' current behavior into the baseline |
 | `usage` | tokens / dollars / plan-limit share of this prompt, session, 30 days; estimate of source an agent would have read instead |
@@ -102,6 +104,48 @@ run) and `backlens accept [route...]`, API `POST /api/behavior/diff|accept`, `GE
 | ~ changed | more queries or a new statement; more Redis or outgoing calls; a new outgoing host; a new perf issue; a new field; slower (only with `--time`) |
 | ↑ better | fewer queries or calls; an issue gone; 4xx/5xx → 2xx; faster (only with `--time`) |
 | Noise rules | an empty array or a null value hides its subtree (data drift); null ↔ type is not a type change; a status class change skips the other comparisons; time is opt-in, needs more than 2× and 10 ms with every run past every baseline run, is re-run to confirm, and is dropped when a third of the routes move together |
+
+## 5c. Access broker (login profiles)
+
+`src/access/`, `src/dashboard/routes/access.js`. MCP `save_login`; `as` on `measure_url`,
+`measure_request`; `diff` uses profiles for signed-in routes.
+
+| Part | Detail |
+|---|---|
+| Save | from a recorded sign-in request (POST): body values found in the project's `.env` files (this folder and up to 3 above) become `${env:NAME}`; a secret-looking field (`password`, `token`, `otp`…) whose value is in no `.env` keeps the profile in memory for the session only, never written |
+| File | `.backlens/profiles.json`, mode 600, names and env references only; first saved profile is the default |
+| Sign in | the dashboard sends the login unrecorded, keeps a bearer token (`accessToken`, `token`, `jwt`… up to 2 levels deep) or `Set-Cookie` cookies in memory for 10 min; again after an app restart |
+| As a role | the replay's `authorization` / `cookie` are swapped for the role's; the token never reaches the agent or the browser |
+| Diff | a route's request lost after a dashboard restart is sent as its role, or the default profile; a 401/403 from the default profile is a skip, not a break |
+| Test traffic | requests from `run_tests` are kept for replay (`list_requests from: tests`, `measure_request`) |
+
+## 5d. Write sandbox
+
+`src/recorder/sandbox.cjs`, `src/dashboard/sandbox-policy.js`. `measure_request` with `sandbox: true`.
+
+| Part | Detail |
+|---|---|
+| Transaction | every `pg` query of the replayed request runs on one pinned connection inside `BEGIN … ROLLBACK`; the rollback runs when the response is done, then the connection is destroyed |
+| App transactions | `BEGIN`/`START TRANSACTION` → `SAVEPOINT`, `COMMIT`/`END` → `RELEASE`, `ROLLBACK` → `ROLLBACK TO`; a stray `COMMIT` becomes `SELECT 1` |
+| Refused | a recorded write that called out over HTTP; one with database calls not made through `pg` (Prisma engine, other drivers) |
+| Reported | queries on another connection (leaks: "writes may have reached the database"), rollbacks that failed, Redis writes (not undone), late queries after the response (refused) |
+| Limits | fewer warm-ups (Redis writes add up); a replayed create may conflict with what the original request created (another status: reported, not measured); side effects outside pg and HTTP (SMTP, files, queues) are not seen |
+
+## 5e. Harness and evidence
+
+`src/harness/`, `src/evidence/`.
+
+| Part | Detail |
+|---|---|
+| `backlens init <claude\|codex\|cursor>` | merges a stop hook into `.claude/settings.json` / `.codex/hooks.json` / `.cursor/hooks.json` (timeout 90 s; Cursor `loop_limit: 1`) and the MCP server into `.mcp.json` / `.cursor/mcp.json` (Codex: prints `codex mcp add`); leaves invalid JSON and user-made entries alone; `--uninstall` removes only what it added; takes the baseline if backlens is running |
+| Stop hook | silent without a running backlens or without file changes since the last passing check (git status + diff hash); otherwise `diff` within 45 s: broken → block with a short reason (Claude/Codex `decision: block`, Cursor `followup_message`), once per turn; changed/better → accepted and noted to the user (Claude/Codex `systemMessage`); errors and timeouts never block |
+| Ledger | `.backlens/evidence.jsonl` (mode 600): every diff, measurement, accept, baseline and hook decision with routes, counts, verdicts, timings; no headers or values |
+| Report | `backlens report [--since h] [--all]` / MCP `report`: last check, breaks caught on the way (and how often the agent was sent back), accepted changes with what changed, measured before → after per request |
+
+## Eval harness
+
+`scripts/eval/` (not shipped): runs tasks with and without backlens through `claude -p` in fresh
+worktrees, recording success, regressions shipped, tokens, cost and turns. No results yet.
 
 ## Measurement (how a before → after is decided)
 
@@ -144,9 +188,9 @@ Fixed in Phase 1 (2026-11-12), see WORKLOG.md:
 
 Open:
 
-1. Requests recorded from tests cannot be replayed, and `measure_url` cannot send headers, so
-   signed-in routes need a manual login to get something measurable. (Phase 3)
-2. No replay of writes (POST/PUT/DELETE) except by opt-in, which changes the dev database.
+1. Login profiles handle JSON or form logins that answer with a token or cookie; OAuth-only,
+   CSRF-protected or multi-step (OTP) logins are not handled.
+2. Writes replay only in the sandbox (pg only), only through `measure_request`; `diff` covers reads.
 3. Postgres only for the index advisor (16+); no mysql2 or MongoDB; macOS-tested.
 4. Measuring costs an app restart (~7 s on oldmonk); so does a `diff` when the app has had traffic
    since it started (none after a code change, since the watcher already restarted it). Small real gains (≈ 1–1.5 ms) can come out
@@ -154,5 +198,12 @@ Open:
 5. A rate limiter can eat replays: 30 warm-ups + 20 runs is 50 requests per measurement, and a
    30-route diff is 120 requests.
 6. `diff` covers reads only, one request per route, and only routes the app served; signed-in
-   routes need a request in the dashboard's memory (Phase 3: login profiles).
+   routes need a request in the dashboard's memory or a saved login profile.
 7. `diff` time is too noisy right after a code change to be on by default.
+8. Shape checks cannot see value changes, so a field that is always null in the baseline cannot
+   show a regression.
+9. An expired token on a route where sign-in is optional reads as fewer queries (anonymous), not a
+   401, so the role retry does not catch it.
+10. Queries an app runs inside its own transaction (a client from `pool.connect`, driven by an ORM
+   from a microtask) can go unrecorded: `POST /v1/lessons/:id/complete` on oldmonk shows 1 query
+   while its sandboxed replay ran 11 statements. Query counts in `diff` undercount such routes.

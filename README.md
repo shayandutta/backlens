@@ -93,6 +93,8 @@ Keep `npx backlens@latest` running in the server folder; the MCP server reads th
 | `app_logs`, `restart_app`, `run_tests` | the app's output, a restart, the test script with its issues |
 | `diff` | what the change did to the whole app: one recorded read per route replayed and compared with a baseline (status, response fields and types, queries, calls, errors, new issues). ✗ broken, ~ changed, ↑ better; silent when nothing changed |
 | `accept` | take intended changes into that baseline |
+| `save_login` | save how to sign in as a role (from a recorded sign-in), so `as: "admin"` works everywhere |
+| `report` | Markdown evidence for a pull request: breaks caught, changes accepted, measured before → after |
 | `usage` | what the work cost: tokens and dollars for this prompt, the session and the last 30 days |
 
 A typical loop: *list_issues → get_request → measure (before) → edit → measure again → run_tests → diff*. On a sample N+1 that went from 6 queries and 6.7 ms to 2 queries and 1.6 ms, checked by replay. Writes are never replayed, and parameter values never reach the agent.
@@ -148,6 +150,48 @@ GET /v1/auth/me
 - **Data drift is not a change:** a list empty this time, a field null this time.
 - **Time is off by default.** Right after a code change, a dev watcher that is still compiling makes timings noisy. `--time` adds a coarse check (more than 2× and 10 ms, confirmed by a re-run); `measure_request` is the precise tool.
 - **The baseline** is `.backlens/behavior.json`, readable by you only: routes, paths and fingerprints, with no headers, cookies or values. Signed-in routes are replayed with the request backlens holds in memory, so after restarting backlens, use such a page once before diffing it.
+
+### Signed-in routes, without handing over passwords
+
+Sign in once in the app, then have the agent save that sign-in as a role:
+
+```
+save_login { name: "admin", id: "<the POST /login request>" }
+measure_url { url: "/v1/admin/users", as: "admin" }
+```
+
+- **Profile file:** `.backlens/profiles.json`, readable by you only. It stores `${env:SEED_ADMIN_PASSWORD}`-style references to your `.env`, never the password itself. A password that is in no `.env` file stays in memory for that session only.
+- **Who sees the token:** backlens signs in itself and swaps the token into replays. The agent never sees the token or the password.
+- **`diff`:** uses the profile for signed-in routes, even after backlens restarts.
+
+### Replaying writes, rolled back
+
+`measure_request { id, sandbox: true }` replays a recorded POST, PUT or DELETE.
+
+- **What gets undone:** every Postgres query of the request runs in one transaction that is rolled back when the response is done. The app's own `BEGIN`/`COMMIT` become savepoints, so nothing commits.
+- **What it refuses:** a request that called out over HTTP, and database calls that don't go through `pg`.
+- **What it reports:** Redis writes, which are not undone, and any query that escaped the transaction.
+
+### The gate: `backlens init claude` (or `codex`, `cursor`)
+
+```
+npx backlens init claude
+```
+
+- **What it adds:** the MCP server, plus a stop hook. When the agent finishes a turn that changed files, the hook runs `diff`.
+- **On a break:** the agent is sent back once with the reason (`✗ GET /v1/me/orders answers 500`).
+- **On other changes:** they are noted and accepted.
+- **When nothing changed:** it says nothing.
+- **When backlens is not running:** it does nothing.
+- **Undo:** `--uninstall`.
+
+### Evidence for the PR
+
+```
+npx backlens report > evidence.md
+```
+
+Every diff, measurement and hook decision is logged to `.backlens/evidence.jsonl` as it runs. The report turns that log into the last check, the breaks caught on the way, the changes accepted and a measured before → after table.
 
 ## In CI: fail the build on new issues
 

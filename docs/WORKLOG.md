@@ -5,6 +5,67 @@ Numbers come from real runs; say so when something was not measured.
 
 ---
 
+## 2026-11-12 (last): Phases 3–6 built and run (branch `phase3/access-broker`)
+
+The code was written while the machine was overloaded (load average about 13 from other work), with nothing run. It was all run afterwards; timings from this session are void, and the checks below are not affected by load.
+
+### Built
+
+- **Phase 3, access broker** (`src/access/`):
+  - login profiles with `${env:NAME}` secrets
+  - the dashboard signs in itself
+  - `as` on the measure tools
+  - `diff` uses the role or the default profile
+  - test-run requests are replayable
+- **Phase 4, harness** (`src/harness/`):
+  - `backlens init claude|codex|cursor`
+  - `backlens hook stop`: block once on a break; accept other changes
+- **Phase 6, in part:**
+  - evidence ledger and `backlens report`
+  - write sandbox for pg (`measure_request sandbox: true`)
+  - Codex and Cursor hook formats, checked against their docs
+- **Phase 5:** eval harness (`scripts/eval/`).
+
+### Verified
+
+| Check | Result |
+|---|---|
+| `npm test`, `npm run check` | 89/89 passing, 118 files parse (the first run after writing everything blind) |
+| Phase 3: diff after a dashboard restart, nothing recorded | 17/17 routes checked, 0 skipped; signed-in routes went through the saved admin login |
+| Phase 3: `measure_request` on a request recorded from the test run | replayed against the dev app: 200 |
+| Phase 3: `save_login`, then `measure_url as admin` | profile holds only `${env:...}`; 200 as admin, 401 without |
+| Sandbox: 3 replays of `POST /v1/lessons/:id/complete` (runs in the app's own transaction) | `updated_at` and row counts of `lesson_progress`, `chapter_unlocks`, `audit_log` unchanged; 33 statements rolled back; Redis `EVAL` (rate limiter) listed as not undone; refused without `sandbox: true` |
+| `init` and `--uninstall` for claude, codex and cursor in an empty folder | install writes the 5 expected files; uninstall leaves nothing; a user's own `settings.json` is kept intact |
+| Agent run 1 (Sonnet, headless): "select only the columns admin/users needs" | the agent found nothing to change, made no edits, and suggested measuring first. Hook ran: clean, silent. $0.08, 3 turns |
+| Agent run 2 (Sonnet): "remove the lessonsCompleted and lastActiveAt subqueries from the admin users list" | the hook **blocked**: `✗ GET /v1/admin/users response lost $.items[].lessonsCompleted`. The agent judged it intended and called `accept`, and told the user the shared contract, the web page and `test/admin.test.ts` still expect the field. The retry stop was clean. $0.16, 13 turns |
+
+### Found and fixed during the runs
+
+- **Expired tokens:** recorded signed-in requests carried sign-ins that had expired, and `diff` reported 11 routes as `401 (was 200)`.
+  - Fix: a route that used to work and now refuses is retried once as the saved role.
+  - `accept` (both paths) never stores a 401/403 over a working baseline.
+  - `measure_request` suggests `as`.
+  - A test (`test/access.test.js`) restarts the app to kill its tokens and checks the diff stays clean.
+- **`init --uninstall` left empty `{}` files and folders.** Now removed.
+- **`backlens report`** described an accepted change using a diff from after the accept. It now uses the last diff before it.
+- **Side effect worth knowing:** a hook written to `.claude/settings.json` was picked up live by the Claude Code session already running in that folder (this one).
+
+### Learned
+
+- **Phase 4's "done when" is half met.** The hook blocked a real break and the agent responded unaided. It chose "intended, accept" rather than "fix", which was right for the task as worded. A task where the break is clearly unintended is still to be run.
+- **What blocking added:** the agent went and found the contract, UI and test that depend on the field before finishing.
+- **Shape checks can't see a field that is always null in the baseline.** `lastActiveAt` was null for every seeded user, so only a missing field or a changed type would show.
+- **An expired token on a route where sign-in is optional** reads as `fewer queries` (anonymous) rather than a 401, so it is not caught by the retry.
+- **Queries inside an app's own transaction can go unrecorded** (FEATURES gap 10).
+
+### Not done
+
+- **Eval pilot (Phase 5): blocked.** The Claude Code permission classifier denied running `scripts/eval/run.mjs` (headless agents with Bash in new worktrees). Run it yourself, or allow it:
+  `node scripts/eval/run.mjs <tasks.json> --out results.jsonl`.
+- **Next.js full-stack, and write replays inside `diff`.**
+
+---
+
 ## 2026-11-12 (later): Phase 2, behavior diff (branch `phase2/behavior-diff`)
 
 ### Done

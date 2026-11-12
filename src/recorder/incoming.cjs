@@ -13,6 +13,7 @@ const { now, round, storage } = require('./context.cjs');
 const { SOURCE } = require('./env.cjs');
 const { handleCommand } = require('./index-advisor.cjs');
 const { captureBody } = require('./shape.cjs');
+const sandbox = require('./sandbox.cjs');
 const { post, send, tokenOk } = require('./transport.cjs');
 
 // Framework internals and browser asset fetches, not the app's own routes: Next.js build
@@ -50,6 +51,8 @@ function patchServers() {
       if (replayOf) trace.replayOf = String(replayOf);
       // The behavior diff asks for the response's shape (paths and types, no values) on its replays.
       const shapeDone = replayOf && req.headers['x-backlens-shape'] === '1' ? captureBody(res) : null;
+      // A replayed write in the sandbox: its Postgres work is rolled back after the response.
+      if (replayOf && req.headers['x-backlens-sandbox'] === '1') trace.sandbox = sandbox.create();
       const chunks = [];
       let bodySize = 0;
       const reqEmit = req.emit;
@@ -78,6 +81,13 @@ function patchServers() {
         delete trace.began;
         // Spans reported after the fact (Prisma's engine) are added late: keep them in time order.
         trace.spans.sort((a, b) => a.start - b.start);
+        if (trace.sandbox) {
+          const sb = trace.sandbox;
+          // The state stays on the trace (closed), so late queries from this request are refused;
+          // the report carries only what happened.
+          sandbox.close(sb).then((result) => send({ ...trace, sandbox: result }));
+          return;
+        }
         send(trace);
       };
       res.once('finish', () => finish(false));

@@ -107,6 +107,7 @@ export function createProcesses({ root, pm, port, token, manualArgv, mirror, sto
   function startTests() {
     const config = getConfig();
     store.testRun.traces = [];
+    store.testReplays.clear();
     store.testRun.report = null;
     tests.lines = [];
     tests.start(scriptCommand(pm, config.test), root);

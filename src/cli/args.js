@@ -11,7 +11,7 @@ export function parseArgs(argv) {
   return {
     own,
     command,
-    subcommand: ['test', 'mcp', 'statusline', 'diff', 'accept'].includes(own[0]) ? own[0] : null,
+    subcommand: ['test', 'mcp', 'statusline', 'diff', 'accept', 'init', 'hook', 'report'].includes(own[0]) ? own[0] : null,
     has: (name) => own.includes(name),
     /** The value after a flag (`--port 7777`), or undefined. */
     flag: (name) => {
@@ -41,6 +41,17 @@ export const HELP = `usage:
 
   backlens accept [route...]
       Take the current behavior of these routes (or all) as the new baseline.
+
+  backlens init <claude|codex|cursor> [--uninstall] [--no-mcp] [--local]
+      Connect a coding agent: adds the MCP server and a stop hook that runs the behavior
+      diff when a turn changed files and sends the agent back when something broke.
+
+  backlens hook stop [--harness claude|codex|cursor]
+      The stop hook itself (reads the agent's hook input on stdin).
+
+  backlens report [--since <hours>] [--all]
+      Markdown evidence for a pull request: behavior diffs, accepted changes and
+      measurements recorded in .backlens/evidence.jsonl.
 
   backlens statusline --install | --uninstall
       For Claude Pro and Max: lets backlens see how much of your plan's 5-hour and weekly

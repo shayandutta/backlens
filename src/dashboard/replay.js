@@ -42,12 +42,12 @@ export function createReplayer() {
    * 47% faster on the next measurement. So warm-ups run in windows of `warmups` requests until a
    * window's median is no longer clearly faster than the one before (or `maxWarmups` is reached).
    */
-  async function measure(payload, port, { warmups = REPLAY.warmups, maxWarmups = REPLAY.maxWarmups, samples = REPLAY.samples } = {}) {
+  async function measure(payload, port, { warmups = REPLAY.warmups, maxWarmups = REPLAY.maxWarmups, samples = REPLAY.samples, headers = null } = {}) {
     const id = randomUUID();
     const windowMedian = async () => {
       const ds = [];
       for (let i = 0; i < warmups; i++) {
-        const t = await send(payload, port, id);
+        const t = await send(payload, port, id, headers);
         if (t) ds.push(t.duration);
       }
       return ds.length ? ds.sort((a, b) => a - b)[Math.floor(ds.length / 2)] : null;
@@ -60,7 +60,7 @@ export function createReplayer() {
     }
     const out = [];
     for (let i = 0; i < samples; i++) {
-      const t = await send(payload, port, id);
+      const t = await send(payload, port, id, headers);
       if (!t) break;
       out.push(t);
     }

@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { asRole } from '../access/login.js';
 import { routeOf } from '../analysis/index.js';
 import { compareFingerprints, RANK } from '../diff/compare.js';
 import { fingerprint } from '../diff/fingerprint.js';
+import { record } from '../evidence/ledger.js';
 import { projectDir } from '../shared/project-config.js';
 import { SAFE_METHODS } from '../shared/replay-policy.js';
 
@@ -14,13 +16,15 @@ import { SAFE_METHODS } from '../shared/replay-policy.js';
  *
  * The baseline on disk (.backlens/behavior.json, mode 600) holds routes, URLs (without a query
  * that looks like it carries a secret) and fingerprints, never headers or values: the requests themselves (cookies, tokens) stay in the dashboard's memory. After a
- * dashboard restart a signed-in route needs one fresh request from the app before it can be
- * checked again; a public route is sent as a plain GET.
+ * dashboard restart a signed-in route is sent as its login profile's role (the one it was taken
+ * as, or the default profile); without a profile it needs one fresh request from the app first. A
+ * public route is sent as a plain GET.
  */
 
 export const MAX_ROUTES = 30;
 const WARMUPS = 1;
 const RUNS = 3;
+const ACCEPT_FRESH_MS = 10 * 60 * 1000;
 const SHAPE_HEADERS = { 'x-backlens-shape': '1', 'accept-encoding': 'identity' };
 const AUTH_HEADERS = ['authorization', 'cookie', 'x-api-key'];
 // Query keys that may carry a secret: such a URL is saved without its query, and the route needs a
@@ -35,9 +39,11 @@ function diskUrl(url) {
   return keys.some((k) => SECRET_QUERY.test(k)) ? { url: url.slice(0, q), secret: true } : { url, secret: false };
 }
 
-export function createBehavior({ root, store, replayer, fresh }) {
+export function createBehavior({ root, store, replayer, fresh, access = null }) {
   const file = join(projectDir(root), 'behavior.json');
   const payloads = new Map();
+  // route -> what the last diff saw, so accepting it right after needs no new replay or restart.
+  const lastSeen = new Map();
 
   function load() {
     try {
@@ -117,8 +123,13 @@ export function createBehavior({ root, store, replayer, fresh }) {
         skipped.push({ route: c.route, why: r.skip });
         continue;
       }
-      payloads.set(c.route, c.payload);
       const last = r.traces.at(-1);
+      const prior = entries.get(c.route);
+      if ([401, 403].includes(last.status) && prior && prior.fingerprint.status < 400) {
+        skipped.push({ route: c.route, why: `it answers ${last.status} now, which looks like an expired sign-in, not a change; save a login (save_login) or use the page again` });
+        continue;
+      }
+      payloads.set(c.route, c.payload);
       const safe = diskUrl(c.payload.url);
       entries.set(c.route, {
         route: c.route,
@@ -126,6 +137,7 @@ export function createBehavior({ root, store, replayer, fresh }) {
         path: last.url,
         url: safe.url,
         authed: safe.secret || AUTH_HEADERS.some((h) => c.payload.headers && h in c.payload.headers),
+        as: access ? access.sessions.roleOf(c.payload.headers) : null,
         fingerprint: fingerprint(r.traces),
         at: Date.now(),
       });
@@ -134,6 +146,7 @@ export function createBehavior({ root, store, replayer, fresh }) {
     fresh.markUsed(run);
     const list = [...entries.values()].slice(0, MAX_ROUTES);
     save({ version: 1, at: Date.now(), entries: list });
+    record(root, routes ? 'accept' : 'baseline', { routes: captured, skipped: skipped.length });
     return { entries: list.length, captured, skipped, restarted, ms: Date.now() - started };
   }
 
@@ -153,19 +166,55 @@ export function createBehavior({ root, store, replayer, fresh }) {
     const results = [];
     const skipped = [];
     const checked = [];
+    const signedIn = new Set();
     for (const e of entries) {
-      const payload = payloadFor(e);
+      let payload = payloadFor(e);
+      // A route taken as a role is always sent as that role; a signed-in route whose request is
+      // gone falls back to the default profile.
+      const role = access && (e.as || (!payload && e.authed ? access.profiles.defaultName() : null));
+      if (role) {
+        try {
+          payload = asRole(payload || { method: e.method, url: e.url, headers: {} }, await access.sessions.headersFor(role, { fresh: restarted && !signedIn.has(role) }));
+          signedIn.add(role);
+        } catch (err) {
+          if (!payload || e.as) {
+            skipped.push({ route: e.route, why: err.message });
+            continue;
+          }
+        }
+      }
       if (!payload) {
-        skipped.push({ route: e.route, why: 'signed-in route and its request is no longer in memory: use the page once in the app' });
+        skipped.push({ route: e.route, why: 'signed-in route and its request is no longer in memory: use the page once in the app, or save a login profile (save_login)' });
         continue;
       }
-      const r = await replay(payload, port);
+      let r = await replay(payload, port);
       if (r.skip) {
         skipped.push({ route: e.route, why: r.skip });
         continue;
       }
+      // The request held in memory may carry a sign-in that has since expired: a route that used
+      // to work and now refuses is tried once more as the saved role before it counts.
+      const refused = (x) => x.traces && [401, 403].includes(x.traces.at(-1).status) && e.fingerprint.status < 400;
+      const fallback = access && !role && (e.as || access.profiles.defaultName());
+      if (refused(r) && fallback) {
+        try {
+          const retry = await replay(asRole(payload, await access.sessions.headersFor(fallback, { fresh: restarted && !signedIn.has(fallback) })), port);
+          signedIn.add(fallback);
+          if (retry.traces && !refused(retry)) {
+            r = retry;
+            payload = asRole(payload, await access.sessions.headersFor(fallback));
+          }
+        } catch {}
+      }
+      const got = r.traces.at(-1).status;
+      if (role && !e.as && (got === 401 || got === 403) && e.fingerprint.status < 400) {
+        skipped.push({ route: e.route, why: `sent as ${role} (the default profile), which this route refuses (${got}); use the page once in the app as the right user` });
+        continue;
+      }
       payloads.set(e.route, payload);
-      const findings = compareFingerprints(e.fingerprint, fingerprint(r.traces));
+      const now = fingerprint(r.traces);
+      lastSeen.set(e.route, { fingerprint: now, at: Date.now() });
+      const findings = compareFingerprints(e.fingerprint, now);
       checked.push({ e, payload, findings: time ? findings : findings.filter((f) => !f.time) });
     }
     // Time is the one noisy signal. Many routes slower at once is the machine, not the code: drop
@@ -180,12 +229,14 @@ export function createBehavior({ root, store, replayer, fresh }) {
         const again = await replay(c.payload, port);
         const confirmed = again.traces ? compareFingerprints(c.e.fingerprint, fingerprint(again.traces)).filter((f) => f.time) : [];
         c.findings = [...c.findings.filter((f) => !f.time), ...confirmed];
+        if (again.traces) lastSeen.set(c.e.route, { fingerprint: fingerprint(again.traces), at: Date.now() });
       }
     }
     for (const c of checked) if (c.findings.length) results.push({ route: c.e.route, findings: c.findings.sort((a, b) => RANK[a.kind] - RANK[b.kind]).map(({ kind, what }) => ({ kind, what })) });
     fresh.markUsed(run);
     results.sort((a, b) => RANK[a.findings[0].kind] - RANK[b.findings[0].kind]);
     const count = (kind) => results.reduce((n, r) => n + r.findings.filter((f) => f.kind === kind).length, 0);
+    record(root, 'diff', { checked: checked.length, broken: count('broken'), changed: count('changed'), better: count('better'), results, skipped: skipped.length, ms: Date.now() - started });
     return {
       checked: checked.length,
       note,
@@ -200,8 +251,28 @@ export function createBehavior({ root, store, replayer, fresh }) {
     };
   }
 
-  /** Takes the routes' behavior now as the new baseline (all routes when none given). */
-  const accept = (routes) => capture(routes && routes.length ? routes : null);
+  /**
+   * Takes the routes' behavior now as the new baseline (all routes when none given). Routes the
+   * last diff just checked take what it saw (within ACCEPT_FRESH_MS); others are replayed.
+   */
+  async function accept(routes) {
+    const want = routes && routes.length ? routes : null;
+    const baseline = load();
+    if (want && baseline) {
+      const ready = want.every((r) => lastSeen.has(r) && Date.now() - lastSeen.get(r).at < ACCEPT_FRESH_MS && baseline.entries.some((e) => e.route === r));
+      if (ready) {
+        // A sign-in failure is never taken as the new normal: it is almost always an expired login.
+        const authFail = (e) => [401, 403].includes(lastSeen.get(e.route).fingerprint.status) && e.fingerprint.status < 400;
+        const skipped = baseline.entries.filter((e) => want.includes(e.route) && authFail(e)).map((e) => ({ route: e.route, why: `it answers ${lastSeen.get(e.route).fingerprint.status} now, which looks like an expired sign-in, not a change; save a login (save_login) or use the page again` }));
+        const taken = want.filter((r) => !skipped.some((x) => x.route === r));
+        for (const e of baseline.entries) if (taken.includes(e.route)) Object.assign(e, { fingerprint: lastSeen.get(e.route).fingerprint, at: Date.now() });
+        if (taken.length) save({ ...baseline, at: Date.now() });
+        record(root, 'accept', { routes: taken, skipped: skipped.length });
+        return { entries: baseline.entries.length, captured: taken, skipped, ms: 0 };
+      }
+    }
+    return capture(want);
+  }
 
   const list = () => load();
 

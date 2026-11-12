@@ -12,11 +12,11 @@ export default function trafficRoutes({ root, store, snapshotDir }) {
       path: '/api/state',
       handle(req, res) {
         const { routes, issues } = store.summary();
-        const recent = store.traces
-          .slice(-300)
-          .reverse()
-          .map((t) => ({ id: t.id, at: t.at, method: t.method, url: t.url, route: routeOf(t.method, t.url, t.template), status: t.status, duration: t.duration, spans: t.spans.length, aborted: Boolean(t.aborted), afterFix: Boolean(t.afterFix) }));
-        return json(res, 200, { routes, issues, recent, total: store.traces.length, received: store.received });
+        const brief = (t) => ({ id: t.id, at: t.at, method: t.method, url: t.url, route: routeOf(t.method, t.url, t.template), status: t.status, duration: t.duration, spans: t.spans.length, aborted: Boolean(t.aborted), afterFix: Boolean(t.afterFix) });
+        const recent = store.traces.slice(-300).reverse().map(brief);
+        // The last test run's requests too: replayable with measure_request since Phase 3.
+        const tests = store.testRun.traces.slice(-300).reverse().map(brief);
+        return json(res, 200, { routes, issues, recent, tests, total: store.traces.length, received: store.received });
       },
     },
     {
