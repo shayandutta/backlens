@@ -48,6 +48,8 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
   const payloads = new Map();
   // route -> what the last diff saw, so accepting it right after needs no new replay or restart.
   const lastSeen = new Map();
+  // The last diff's result, for the dashboard's Diff tab.
+  let last = null;
 
   function load() {
     try {
@@ -313,7 +315,8 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
     // Fields that were null in every baseline response: a change in their values cannot be seen.
     const unverifiable = checked.reduce((n, c) => n + Object.values((c.e.fingerprint && c.e.fingerprint.shape) || {}).filter((t) => t === 'null').length, 0);
     record(root, 'diff', { checked: checked.length, broken: count('broken'), changed: count('changed'), better: count('better'), results, skipped: skipped.length, ms: Date.now() - started });
-    return {
+    last = {
+      at: Date.now(),
       checked: checked.length,
       note,
       unverifiable,
@@ -326,6 +329,7 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
       restarted,
       ms: Date.now() - started,
     };
+    return last;
   }
 
   /**
@@ -334,6 +338,8 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
    */
   async function accept(routes) {
     const want = routes && routes.length ? routes : null;
+    // Accepted routes leave the last diff's list: they are the new normal.
+    if (last) last = { ...last, results: want ? last.results.filter((r) => !want.includes(r.route)) : [] };
     const baseline = load();
     if (want && baseline) {
       const ready = want.every((r) => lastSeen.has(r) && Date.now() - lastSeen.get(r).at < ACCEPT_FRESH_MS && baseline.entries.some((e) => e.route === r));
@@ -352,6 +358,7 @@ export function createBehavior({ root, store, replayer, fresh, access = null }) 
   }
 
   const list = () => load();
+  const lastDiff = () => last;
 
-  return { capture, diff, accept, list };
+  return { capture, diff, accept, list, lastDiff };
 }

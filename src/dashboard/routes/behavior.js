@@ -8,6 +8,14 @@ export default function behaviorRoutes({ behavior }) {
   };
   return [
     { method: 'GET', path: '/api/behavior', handle: (req, res) => json(res, 200, behavior.list() || { entries: [] }) },
+    {
+      method: 'GET',
+      path: '/api/behavior/last',
+      handle: (req, res) => {
+        const b = behavior.list();
+        json(res, 200, { last: behavior.lastDiff(), baseline: b ? { routes: b.entries.length, at: b.at } : null });
+      },
+    },
     { method: 'POST', path: '/api/behavior/diff', handle: one((body) => behavior.diff({ route: body && typeof body.route === 'string' ? body.route : null, time: Boolean(body && body.time) })) },
     {
       method: 'POST',
