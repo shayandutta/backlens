@@ -11,11 +11,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
         node: [20, 22, 24]
+        # macOS runners are scarce (jobs were dropped as "not acquired"): one Node version there.
+        include:
+          - os: macos-latest
+            node: 22
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
           cache: npm
