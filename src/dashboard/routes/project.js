@@ -1,4 +1,5 @@
 import { readProject } from '../../shared/project.js';
+import { VERSION } from '../../shared/version.js';
 import { saveConfig } from '../../shared/project-config.js';
 import { acceptIntoBaseline } from '../../report/index.js';
 import { json, readJson } from '../http.js';
@@ -12,7 +13,7 @@ export default function projectRoutes({ root, pm, manualArgv, procs, store, base
       handle(req, res) {
         const project = readProject(root);
         const config = getConfig();
-        return json(res, 200, { project: project.name, root, pm, scripts: project.scripts, config, needsSetup: !manualArgv && !config, manual: manualArgv ? manualArgv.join(' ') : null });
+        return json(res, 200, { version: VERSION, project: project.name, root, pm, scripts: project.scripts, config, needsSetup: !manualArgv && !config, manual: manualArgv ? manualArgv.join(' ') : null });
       },
     },
     {

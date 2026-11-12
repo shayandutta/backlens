@@ -39,7 +39,7 @@ export const TOOLS = [
   {
     name: 'measure_request',
     description:
-      'Replays a recorded read request (GET) against the app as it runs now, a few warm-up runs and then measured runs, and compares it with what was recorded earlier: median time, query count, and which issues are still there. Use it after changing code to check the change actually helped. Writes are never replayed.',
+      'Replays a recorded read request (GET) against the app as it runs now, a few warm-up runs and then measured runs: median time with its p25-p75 range, query count, and which issues are still there. Each measurement is taken on a fresh app run (backlens restarts the app first when needed) and saved; measuring the same request again compares like with like and says whether the time change is real or within noise. Call it BEFORE changing code, then again after. Writes are never replayed.',
     inputSchema: {
       type: 'object',
       properties: { id: { type: 'string', description: 'A request id from list_requests or an issue.' }, runs: { type: 'number', description: 'Measured runs (default 5, at most 20).' } },
@@ -50,7 +50,7 @@ export const TOOLS = [
   {
     name: 'measure_url',
     description:
-      'Sends a plain GET to a path on the running app (no cookies, no headers), a few warm-up runs and then measured runs, and compares it with requests recorded earlier on the same route. For public routes, or when there is no recorded request to replay. Call it before changing code too, so there is a before to compare with.',
+      'Sends a plain GET to a path on the running app (no cookies, no headers), a few warm-up runs and then measured runs, and compares it with the last measurement of the same path (warm against warm). For public routes, or when there is no recorded request to replay. Call it BEFORE changing code, then again after.',
     inputSchema: {
       type: 'object',
       properties: { url: { type: 'string', description: 'A path on the app, like "/v1/reviews?page=2".' }, runs: { type: 'number', description: 'Measured runs (default 5, at most 20).' } },

@@ -75,7 +75,14 @@ async function advise(p, text) {
     if (!rows[0]) continue;
     const leading = rows[0].leading || [];
     if (scan.columns.some((col) => leading.includes(col))) continue;
-    post('/advice', { sql: text, table: scan.table, schema: scan.schema, columns: scan.columns, sort: scan.sort, rows: Math.max(0, Number(rows[0].rows)) });
+    // How many different values each filter column holds (from ANALYZE; negative is a share of
+    // the rows). An index on a column with a handful of values rarely beats reading the table.
+    let distinct = {};
+    try {
+      const st = await p.query('select attname, n_distinct from pg_stats where schemaname = $1 and tablename = $2 and attname = any($3)', [scan.schema, scan.table, scan.columns]);
+      distinct = Object.fromEntries(st.rows.map((r) => [r.attname, Number(r.n_distinct)]));
+    } catch {}
+    post('/advice', { sql: text, table: scan.table, schema: scan.schema, columns: scan.columns, sort: scan.sort, rows: Math.max(0, Number(rows[0].rows)), distinct });
   }
 }
 

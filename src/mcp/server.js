@@ -12,7 +12,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { call } from './handlers.js';
 import { TOOLS } from './tools.js';
-import { VERSION } from './version.js';
+import { VERSION } from '../shared/version.js';
 
 const PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 

@@ -1,4 +1,4 @@
-import { percentile, r1 } from '../shared/stats.js';
+import { median, percentile, r1 } from '../shared/stats.js';
 import { checkTrace } from './check-trace.js';
 import { indexIssues } from './index-advice.js';
 import { routeOf } from './routes.js';
@@ -31,10 +31,10 @@ export function summarize(traces, known = [], advice = [], fixed = new Map()) {
     for (const issue of checkTrace(trace)) {
       const key = `${issue.type}|${route}|${issue.sql}|${issue.sites.join(',')}`;
       r.issueKeys.add(key);
-      if (!issues.has(key)) issues.set(key, { ...issue, key, route, seen: 0, example: trace.id, costTotal: 0 });
+      if (!issues.has(key)) issues.set(key, { ...issue, key, route, seen: 0, example: trace.id, costs: [] });
       const agg = issues.get(key);
       agg.seen++;
-      agg.costTotal += issue.cost;
+      agg.costs.push(issue.cost);
       agg.example = trace.id;
       agg.lastAt = Math.max(agg.lastAt || 0, trace.at || 0);
     }
@@ -70,7 +70,9 @@ export function summarize(traces, known = [], advice = [], fixed = new Map()) {
     }))
     .sort((a, b) => b.last - a.last || a.route.localeCompare(b.route));
   const issueList = [...issues.values()]
-    .map((i) => ({ ...i, of: routes.get(i.route).calls, cost: r1(i.costTotal / i.seen) }))
+    // The median, not the mean: the first requests after a start are cold (empty pools, unjitted
+    // code) and would inflate an average. Still an estimate from recorded traffic: measure to confirm.
+    .map(({ costs, ...i }) => ({ ...i, of: routes.get(i.route).calls, cost: costs && costs.length ? r1(median(costs)) : i.cost || 0 }))
     .sort((a, b) => (a.severity === b.severity ? b.seen * b.cost - a.seen * a.cost : a.severity === 'warn' ? -1 : 1));
   return { routes: routeList, issues: issueList };
 }

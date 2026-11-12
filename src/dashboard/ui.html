@@ -357,7 +357,7 @@ function renderIssues() {
       <div class="bar"></div>
       <div>
         <h3>${esc(i.title)}</h3>
-        <div class="meta"><span>${esc(i.route)}</span><span>seen in ${i.seen} of ${i.of} request${i.of === 1 ? '' : 's'}</span><span>~${ms(i.cost)} lost each time</span></div>
+        <div class="meta"><span>${esc(i.route)}</span><span>seen in ${i.seen} of ${i.of} request${i.of === 1 ? '' : 's'}</span>${i.cost ? `<span>${i.type === 'serial' ? `up to ~${ms(i.cost)} saved if run together (estimate)` : `~${ms(i.cost)} repeated work each time`}</span>` : ''}</div>
         <div class="meta">${i.sites.map(siteLink).join('<span>→</span>')}</div>
         <pre>${esc(i.sql)}</pre>
         <div class="fix"><b>Fix:</b> ${esc(i.fix)}</div>
@@ -804,20 +804,25 @@ function compareCard(j) {
   const c = j.compare;
   if (!c || !c.before || !['verified', 'failed', 'unverified', 'kept', 'reverted'].includes(j.stage)) return '';
   const pct = (a, b) => (a ? Math.round(((b - a) / a) * 100) : 0);
-  const row = (label, a, b, fmt = (x) => x, noise = 0) => {
+  const row = (label, a, b, fmt = (x) => x) => {
     const d = pct(a, b);
-    // Small time differences are noise, not a result: shown plain, not green or red.
-    const tone = a === b || Math.abs(b - a) <= noise ? 'same' : b < a ? 'better' : 'worse';
+    const tone = a === b ? 'same' : b < a ? 'better' : 'worse';
     return `<tr><th>${label}</th><td>${fmt(a)}</td><td class="arrow">→</td><td class="${tone}">${fmt(b)}</td><td class="${tone} delta">${tone === 'same' ? '' : `${d > 0 ? '+' : ''}${d}%`}</td></tr>`;
   };
+  // Time gets a verdict only when both sides were warm replays and their p25-p75 ranges do not
+  // overlap (see shared/compare.js); otherwise it is shown plain, with no percentage.
+  const ch = c.change;
+  const timeTone = ch && ch.verdict === 'faster' ? 'better' : ch && ch.verdict === 'slower' ? 'worse' : 'same';
+  const timeNote = !ch ? (c.beforeKind === 'recorded' ? 'not compared' : '') : ch.verdict === 'same' ? 'within noise' : `${ch.pct > 0 ? '+' : ''}${ch.pct}%`;
+  const range = (t) => (t.lo != null && t.hi != null && t.runs > 1 ? ` <span class="delta" style="color:var(--sub)">${t.lo}-${t.hi}</span>` : '');
   return `<section class="compare-card"><h4>Same request, before and after the change</h4><table>
-    ${row('time (median)', c.before.ms, c.after.ms, (x) => ms(x), Math.max(3, c.before.ms * 0.15))}
+    <tr><th>time (median)</th><td>${ms(c.before.ms)}${range(c.before)}</td><td class="arrow">→</td><td class="${timeTone}">${ms(c.after.ms)}${range(c.after)}</td><td class="${timeTone} delta">${timeNote}</td></tr>
     ${row('database queries', c.before.queries, c.after.queries)}
     ${c.before.redis || c.after.redis ? row('redis calls', c.before.redis, c.after.redis) : ''}
     ${c.before.http || c.after.http ? row('outgoing http', c.before.http, c.after.http) : ''}
     <tr><th>status</th><td>${c.before.status}</td><td class="arrow">→</td><td class="${c.before.status === c.after.status ? 'same' : 'worse'}">${c.after.status}</td><td></td></tr>
     <tr><th>issue</th><td>found</td><td class="arrow">→</td><td class="${c.issueGone ? 'better' : 'worse'}">${c.issueGone ? 'gone' : 'still there'}</td><td></td></tr>
-  </table><p class="note">Before: ${c.beforeRuns} recorded request${c.beforeRuns === 1 ? '' : 's'}. After: ${c.afterRuns} replay${c.afterRuns === 1 ? '' : 's'}${c.warmed ? ', after warming the restarted app up' : ''}. Query counts are exact; a time change within a few ms is noise.</p></section>`;
+  </table><p class="note">Before: ${c.beforeKind === 'recorded' ? `${c.beforeRuns} recorded request${c.beforeRuns === 1 ? '' : 's'} (may include cold ones, so time is not compared)` : `${c.beforeRuns} warm replay${c.beforeRuns === 1 ? '' : 's'} of the old code`}. After: ${c.afterRuns} replay${c.afterRuns === 1 ? '' : 's'}${c.warmed ? ', after warming the restarted app up' : ''}. Ranges are p25-p75. Query counts are exact; a time change counts only when the ranges do not overlap.</p></section>`;
 }
 
 // ---- creating a suggested index from the drawer ----------------------------------------

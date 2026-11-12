@@ -1,8 +1,9 @@
 import { relative } from 'node:path';
 import { agentUsage, usageText } from '../agent-usage/index.js';
-import { issueText, ms, plural, traceText } from './format.js';
+import { timingText } from '../shared/compare.js';
+import { ago, issueText, ms, plural, traceText } from './format.js';
 import { api, findSessions, NOT_RUNNING } from './session.js';
-import { VERSION } from './version.js';
+import { VERSION } from '../shared/version.js';
 
 /** What each tool does: reads the running dashboard's API and answers in plain text. */
 
@@ -18,13 +19,22 @@ export async function call(name, args, cwd) {
 
   if (name === 'status') {
     const [state, appInfo, config] = await Promise.all([api(session, 'GET', '/api/state'), api(session, 'GET', '/api/app?since=999999999'), api(session, 'GET', '/api/config')]);
+    // The recorder runs from the dashboard's package; this MCP server may be another install
+    // (npx caches each version), and an older one misreads newer answers.
+    const recorder = config.version || session.version || 'an older version (it does not report one)';
     const lines = [
-      `backlens ${VERSION} is recording ${config.project || 'the app'} in ${where} (dashboard http://localhost:${session.port}).`,
+      `backlens is recording ${config.project || 'the app'} in ${where} (dashboard http://localhost:${session.port}).`,
+      `versions: recorder ${recorder}, MCP server ${VERSION}`,
       `app: ${appInfo.status}${appInfo.port ? ` on :${appInfo.port}` : ''}${appInfo.command ? `, ${appInfo.command}` : ''}`,
       `recorded: ${plural(state.total, 'request')} on ${state.routes.filter((r) => r.calls).length} of ${state.routes.length} routes`,
       `issues: ${state.issues.length}${state.issues.length ? ` (${state.issues.filter((i) => i.severity === 'warn').length} worth fixing first)` : ''}`,
       `tests: ${config.config && config.config.test ? `\`${config.config.test}\` script` : 'no test script picked'}`,
     ];
+    if (recorder !== VERSION)
+      lines.push(
+        '',
+        `Version mismatch: the recorder is ${recorder} and this MCP server is ${VERSION}. Run both from the same version: restart \`npx backlens@latest\` and re-add the MCP server with \`claude mcp add backlens -- npx -y backlens@latest mcp\`, then reconnect it.`,
+      );
     if (!state.total) lines.push('', 'Nothing recorded yet: use the app (or run the tests) so backlens sees real requests.');
     if (sessions.length > 1) lines.push('', `Other backlens sessions: ${sessions.slice(1).map((s) => relative(cwd, s.root) || '.').join(', ')} (using the newest).`);
     return lines.join('\n');
@@ -74,14 +84,24 @@ export async function call(name, args, cwd) {
     if (name === 'measure_request' && typeof args.id !== 'string') throw new Error('Give a request id from list_requests.');
     if (name === 'measure_url' && typeof args.url !== 'string') throw new Error('Give a path on the app, like /v1/reviews.');
     const m = await api(session, 'POST', '/api/measure', name === 'measure_url' ? { url: args.url, runs: args.runs } : { id: args.id, runs: args.runs });
-    const row = (label, x) => (x ? `${label.padEnd(18)} ${ms(x.ms).padStart(10)}   ${String(x.queries).padStart(3)} queries  ${String(x.redis).padStart(3)} redis  ${String(x.http).padStart(3)} http   status ${x.status}   (${plural(x.runs, 'run')})` : `${label.padEnd(18)} none recorded`);
-    const out = [`${m.route}${name === 'measure_url' ? `  (plain GET ${args.url}, no cookies)` : ''}`, '', row('recorded earlier', m.recorded), row('now (median)', m.now)];
-    if (m.recorded && m.recorded.ms && m.now.ms != null) {
-      const pct = Math.round(((m.now.ms - m.recorded.ms) / m.recorded.ms) * 100);
-      out.push(`${''.padEnd(18)} ${`${pct > 0 ? '+' : ''}${pct}%`.padStart(10)}   ${m.now.queries - m.recorded.queries >= 0 ? '+' : ''}${m.now.queries - m.recorded.queries} queries`);
+    const row = (label, x) =>
+      x ? `${label.padEnd(20)} ${timingText(x).padStart(26)}   ${String(x.queries).padStart(3)} queries  ${String(x.redis).padStart(3)} redis  ${String(x.http).padStart(3)} http   status ${x.status}` : `${label.padEnd(20)} none`;
+    const out = [`${m.route}${name === 'measure_url' ? `  (plain GET ${args.url}, no cookies)` : ''}`, '', `${''.padEnd(20)} ${'median (p25-p75, runs)'.padStart(26)}`];
+    if (m.previous) {
+      out.push(row('measured before', m.previous), row('now', m.now));
+      const dq = m.now.queries - m.previous.queries;
+      const time = m.change.verdict === 'same' ? `time: within noise (${m.change.delta > 0 ? '+' : ''}${m.change.delta} ms, the runs overlap)` : `time: ${m.change.verdict}, ${m.change.delta > 0 ? '+' : ''}${m.change.delta} ms (${m.change.pct > 0 ? '+' : ''}${m.change.pct}%), the runs do not overlap`;
+      out.push('', `${time}; queries: ${dq === 0 ? 'same' : `${dq > 0 ? '+' : ''}${dq}`}${m.now.status !== m.previous.status ? `; status ${m.previous.status} -> ${m.now.status}` : ''}`);
+      out.push(`Compared with the last warm measurement of this request (${ago(m.previous.at)}).`);
+    } else {
+      out.push(row('now', m.now));
+      if (m.recorded) out.push(row('recorded traffic', m.recorded), '(recorded traffic includes cold requests, so it is not compared)');
+      out.push('', 'First measurement of this request: saved. Change the code, then measure it again to compare warm against warm.');
     }
+    if (m.otherStatuses) out.push('', `${m.otherStatuses.runs} of ${m.otherStatuses.of} runs answered ${m.otherStatuses.statuses.join(', ')} instead of ${m.now.status} and were left out${m.otherStatuses.statuses.includes(429) ? ' (rate limited)' : ''}.`);
+    if (m.restarted) out.push('', 'backlens restarted the app first, so this run is measured fresh like the one it is compared with.');
     out.push('', m.issues.length ? `Issues still in the replayed request:\n${m.issues.map((i, n) => `${n + 1}. ${i.title}${i.sites && i.sites.length ? `  (${i.sites.join(' -> ')})` : ''}`).join('\n')}` : 'No issues in the replayed request.');
-    out.push('', 'Timings on a dev machine move by a few ms between runs; query counts are exact.', '', 'Last replay:', traceText(m.trace));
+    out.push('', 'Query counts are exact. Times are warm medians; a change counts only when it is at least 1 ms and the p25-p75 ranges do not overlap.', '', 'Last replay:', traceText(m.trace));
     return out.join('\n');
   }
 

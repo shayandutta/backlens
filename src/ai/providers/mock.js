@@ -10,7 +10,7 @@ export function mockAnswer(task, issue, root) {
     return {
       data: {
         summary: `${issue.title} on ${issue.route}.`,
-        why_it_matters: `Each time, about ${issue.cost} ms goes to work the request already did, in ${issue.seen} of ${issue.of} requests seen.`,
+        why_it_matters: issue.type === 'serial' ? `Running these together could save up to about ${issue.cost} ms per request (an estimate), in ${issue.seen} of ${issue.of} requests seen.` : `Each time, about ${issue.cost} ms goes to work the request already did, in ${issue.seen} of ${issue.of} requests seen.`,
         how_to_fix: issue.fix,
       },
       costUsd: 0,

@@ -71,6 +71,10 @@ test('an editor can list issues and read a request through backlens mcp, without
     assert.ok(tools.some((t) => t.name === 'measure_request'));
     assert.ok(tools.some((t) => t.name === 'usage'));
 
+    const status = (await mcp.tool('status')).content[0].text;
+    assert.match(status, /versions: recorder (\S+), MCP server \1$/m, 'both versions shown');
+    assert.ok(!/mismatch/.test(status), 'same install, no warning');
+
     const issues = await mcp.tool('list_issues');
     assert.ok(!issues.isError, issues.content[0].text);
     assert.match(issues.content[0].text, /N\+1: one query ran 4 times/);

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { startServer } from '../dashboard/server.js';
 import { bold, dim } from '../shared/ansi.js';
 import { ensureIgnore, projectDir } from '../shared/project-config.js';
+import { VERSION } from '../shared/version.js';
 
 /** Ports tried without --port: 7777, or the next free one (another backlens may hold 7777). */
 const PORTS = Array.from({ length: 20 }, (_, i) => 7777 + i);
@@ -59,7 +60,7 @@ function writeSession(root, { port, token }) {
   try {
     mkdirSync(projectDir(root), { recursive: true });
     ensureIgnore(root);
-    writeFileSync(sessionFile, `${JSON.stringify({ port, token, pid: process.pid, root, startedAt: Date.now() })}\n`, { mode: 0o600 });
+    writeFileSync(sessionFile, `${JSON.stringify({ port, token, pid: process.pid, root, startedAt: Date.now(), version: VERSION })}\n`, { mode: 0o600 });
     chmodSync(sessionFile, 0o600);
   } catch {}
   process.on('exit', () => {

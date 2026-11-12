@@ -71,25 +71,25 @@ Set up in **AI settings**, entirely from the dashboard.
 Let Claude Code, Cursor or any MCP client see what your requests do, change the code, and check the change on the same request.
 
 ```
-claude mcp add backlens -- npx -y backlens mcp
+claude mcp add backlens -- npx -y backlens@latest mcp
 ```
 
 Cursor (`.cursor/mcp.json`) and others:
 
 ```json
-{ "mcpServers": { "backlens": { "command": "npx", "args": ["-y", "backlens", "mcp", "--root", "${workspaceFolder}"] } } }
+{ "mcpServers": { "backlens": { "command": "npx", "args": ["-y", "backlens@latest", "mcp", "--root", "${workspaceFolder}"] } } }
 ```
 
-Keep `npx backlens` running in the server folder; the MCP server reads that session (it finds it in the project, a folder above, or a few below, like `apps/api`). Tools:
+Keep `npx backlens@latest` running in the server folder; the MCP server reads that session (it finds it in the project, a folder above, or a few below, like `apps/api`). `@latest` matters: without it, `npx` keeps reusing whatever version it cached first, and the dashboard and the MCP server can drift apart. `status` shows both versions and says when they differ. Tools:
 
 | Tool | What the agent gets |
 |---|---|
-| `status` | is backlens recording, is the app up, traffic and issue counts |
+| `status` | is backlens recording, is the app up, traffic and issue counts, recorder and MCP versions |
 | `list_issues` | issues worst first, with route, `file:line`, statements, a suggested fix and an example request |
 | `list_routes`, `list_requests` | p50, p95, calls per request; recent requests with ids |
 | `get_request` | the waterfall of one request: each query, Redis and HTTP call, its time and the code behind it |
-| `measure_request` | replays a recorded GET against the code as it is now (warm-up, then median of runs) and compares it with what was recorded |
-| `measure_url` | the same for a path sent as a plain GET (no cookies): public routes, or a before when nothing is recorded yet |
+| `measure_request` | replays a recorded GET against the code as it is now (warm-up, then median and p25-p75 of runs); measure before and after a change and it compares warm against warm, saying "within noise" when the runs overlap |
+| `measure_url` | the same for a path sent as a plain GET (no cookies): public routes, or when nothing is recorded yet |
 | `app_logs`, `restart_app`, `run_tests` | the app's output, a restart, the test script with its issues |
 | `usage` | what the work cost: tokens and dollars for this prompt, the session and the last 30 days |
 
@@ -199,7 +199,7 @@ Redis passwords never show: `AUTH`, `HELLO` and similar commands are recorded by
 
 - times each request on Node's own HTTP server, so any framework on top of it works;
 - wraps `pg`, Prisma, `ioredis`, node-redis, `fetch` and outgoing `http`/`https`, and records the line of your code behind each call, through V8's async stack traces for ORMs like drizzle and through source maps for bundled code;
-- asks Postgres for each distinct SELECT's plan with `EXPLAIN (GENERIC_PLAN)` (Postgres 16+), which never runs the query, and flags full-table reads no index covers.
+- asks Postgres for each distinct SELECT's plan with `EXPLAIN (GENERIC_PLAN)` (Postgres 16+), which never runs the query, and flags full-table reads no index covers, on tables of 1,000 rows or more (a full read of a smaller table is what Postgres should do). Filters on columns with only a few values, like a status, are shown as hints.
 
 ## Limits
 

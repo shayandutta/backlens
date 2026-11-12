@@ -4,7 +4,7 @@ import { dirname, join, relative } from 'node:path';
 import { checkTrace } from '../analysis/index.js';
 import { projectDir } from '../shared/project-config.js';
 import { REPLAY, SAFE_METHODS } from '../shared/replay-policy.js';
-import { median } from '../shared/stats.js';
+import { compareTimings, timing } from '../shared/compare.js';
 import { buildContext } from './context.js';
 import { diffOf, normalizeEdits, sameIssue, writeEdits } from './edits.js';
 import { ask, issuePrompt } from './providers/index.js';
@@ -23,8 +23,7 @@ import { gitDirty, needsBuild, readSafe, runScript, tail, typecheckScript } from
  * failed → kept | reverting → reverted. Templates (Promise.all, indexes) skip the model.
  */
 
-// Replays after a fix: warm-up runs first, then measured runs (reads only).
-const WARMUPS = REPLAY.warmups;
+// How many recorded requests stand in for the before when no warm measurement could be taken.
 const SAMPLES = REPLAY.samples;
 const EDIT_REPAIRS = 2;
 const TYPE_REPAIRS = 2;
@@ -201,6 +200,23 @@ export function createFixJobs({ root, deps, settings }) {
   function apply(id) {
     const job = jobs.get(id);
     if (!job || job.stage !== 'proposed') throw new Error('There is no suggestion ready to apply.');
+    job.stage = 'verifying';
+    deps.pauseWatch(true);
+    measureBefore(job)
+      .then(() => {
+        writeFiles(job);
+        return verify(job);
+      })
+      .catch((err) => {
+        job.error = err.message;
+        finish(job, false, err.message);
+      })
+      .finally(() => deps.pauseWatch(false));
+    return view(job);
+  }
+
+  /** Backs up each file as it is now, then writes the edits. */
+  function writeFiles(job) {
     const files = [...new Set(job.edits.map((e) => e.file))];
     // Files with uncommitted changes (an earlier kept fix, work in progress) are fine: the backup
     // is an exact copy of the file as it is now, and Revert puts that copy back.
@@ -219,15 +235,34 @@ export function createFixJobs({ root, deps, settings }) {
     ev(job, 'apply', `Applied ${job.edits.length} edit${job.edits.length === 1 ? '' : 's'} to ${files.join(', ')}`, {
       detail: dirty.length ? `a copy of ${dirty.join(', ')} as it was, uncommitted changes included, is kept until you keep or revert` : 'backup kept until you keep or revert',
     });
-    job.stage = 'verifying';
-    deps.pauseWatch(true);
-    verify(job)
-      .catch((err) => {
-        job.error = err.message;
-        finish(job, false, err.message);
-      })
-      .finally(() => deps.pauseWatch(false));
-    return view(job);
+  }
+
+  /**
+   * Before any file changes: the request that showed the issue, replayed on a freshly restarted app
+   * with the old code, measured the same way as the after. Reads only; skipped when replay is
+   * off, the request is gone or the app is not running (the recorded traffic is then shown instead).
+   */
+  async function measureBefore(job) {
+    job.beforeWarm = null;
+    const payload = settings.get().replay ? deps.getReplay(job.issue.example) : null;
+    if (!payload || !SAFE_METHODS.includes(payload.method) || !deps.appPort() || !deps.replayer) return;
+    const e = ev(job, 'run', `Measure ${job.issue.route} before the change`, { status: 'running' });
+    // The after is measured on a just-restarted app; the before must be too, or a long-running
+    // process (much faster on a dev machine) makes the change look slower.
+    const port = await deps.restartApp();
+    if (!port) {
+      e.status = 'skip';
+      e.detail = 'the app did not come back after a restart; the recorded traffic is used as the before';
+      return;
+    }
+    const samples = await deps.replayer.measure(payload, port);
+    if (!samples.length) {
+      e.status = 'skip';
+      e.detail = 'the request did not come back; the recorded traffic is used as the before';
+      return;
+    }
+    job.beforeWarm = { ...stats(samples.at(-1)), ...timing(samples.map((t) => t.duration)) };
+    e.detail = `median ${job.beforeWarm.ms} ms (${job.beforeWarm.lo}-${job.beforeWarm.hi}) of ${samples.length} warm replays, ${job.beforeWarm.queries} queries`;
   }
 
   async function typecheck(job) {
@@ -291,15 +326,13 @@ export function createFixJobs({ root, deps, settings }) {
       r.status = 'skip';
       r.detail = s.replay ? 'the request that showed this issue is no longer in memory; use the page again to record a fresh one' : 'replay is off in AI settings';
     } else {
-      // A just-restarted app is slow for its first requests (cold code, new database
-      // connections). A read is sent a few times to warm up, then measured several times and the
-      // median kept. A write runs once: replaying it changes data again.
+      // A read is warmed up until it stops getting faster, then measured several times (see
+      // dashboard/replay.js). A write runs once: replaying it changes data again.
       const samples = [];
-      if (!isWrite) for (let i = 0; i < WARMUPS; i++) await replay(job, payload, deps.appPort());
-      for (let i = 0; i < (isWrite ? 1 : SAMPLES); i++) {
+      if (!isWrite && deps.replayer) samples.push(...(await deps.replayer.measure(payload, deps.appPort())));
+      else {
         const t = await replay(job, payload, deps.appPort());
-        if (!t) break;
-        samples.push(t);
+        if (t) samples.push(t);
       }
       const trace = samples.at(-1);
       if (!trace) {
@@ -310,14 +343,21 @@ export function createFixJobs({ root, deps, settings }) {
       replayed = true;
       const still = samples.some((t) => checkTrace(t).some((i) => sameIssue(i, job.issue)));
       const sameClass = original ? Math.floor(trace.status / 100) === Math.floor(original.status / 100) : trace.status < 400;
-      // Before: the same route's recorded requests from before the change, not just one of them.
-      const earlier = (deps.routeTraces ? deps.routeTraces(job.issue.route) : []).filter((t) => t.status === (original || trace).status);
-      const beforeList = earlier.length ? earlier.slice(-SAMPLES) : original ? [original] : [];
-      const after = { ...stats(trace), ms: median(samples.map((t) => t.duration)) };
-      const before = beforeList.length ? { ...stats(original || beforeList.at(-1)), ms: median(beforeList.map((t) => t.duration)) } : null;
+      // Before: the warm measurement taken before the files changed; failing that, the route's
+      // recorded requests (which include cold ones, so no time verdict is drawn from them).
+      const after = { ...stats(trace), ...timing(samples.map((t) => t.duration)) };
+      let before = job.beforeWarm;
+      let beforeKind = 'warm';
+      if (!before) {
+        const earlier = (deps.routeTraces ? deps.routeTraces(job.issue.route) : []).filter((t) => t.status === (original || trace).status);
+        const beforeList = earlier.length ? earlier.slice(-SAMPLES) : original ? [original] : [];
+        before = beforeList.length ? { ...stats(original || beforeList.at(-1)), ...timing(beforeList.map((t) => t.duration)) } : null;
+        beforeKind = 'recorded';
+      }
+      const change = before && beforeKind === 'warm' && !isWrite ? compareTimings(before, after) : null;
       r.status = !still && sameClass ? 'done' : 'fail';
-      r.detail = `before: ${before ? `${before.status}, median ${before.ms} ms of ${beforeList.length} recorded, ${before.queries} queries` : 'no recorded request'}\nafter:  ${after.status}, median ${after.ms} ms of ${samples.length} replays, ${after.queries} queries${still ? ', issue still there' : ', issue gone'}`;
-      job.compare = { before, after, beforeRuns: beforeList.length, afterRuns: samples.length, issueGone: !still, warmed: !isWrite };
+      r.detail = `before: ${before ? `${before.status}, median ${before.ms} ms of ${before.runs} ${beforeKind === 'warm' ? 'warm replays' : 'recorded requests'}, ${before.queries} queries` : 'no recorded request'}\nafter:  ${after.status}, median ${after.ms} ms of ${samples.length} replays, ${after.queries} queries${still ? ', issue still there' : ', issue gone'}${change ? `\ntime: ${change.verdict === 'same' ? 'within noise' : `${change.verdict} by ${Math.abs(change.delta)} ms (${change.pct}%)`}` : ''}`;
+      job.compare = { before, after, beforeKind, change, beforeRuns: before ? before.runs : 0, afterRuns: samples.length, issueGone: !still, warmed: !isWrite };
       job.afterTrace = trace;
       if (trace.status === 401 && original && original.status !== 401) r.detail += '\nThe recorded login may have expired: sign in again and use the page once more.';
       if (r.status === 'fail') return finish(job, false, still ? 'The issue is still there after the change.' : `The request now answers ${trace.status}.`);

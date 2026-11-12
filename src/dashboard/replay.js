@@ -35,10 +35,29 @@ export function createReplayer() {
     if (waiter) waiter(trace);
   }
 
-  /** Warm-up runs, then measured runs: the traces of the measured ones. Used by measure_request. */
-  async function measure(payload, port, { warmups = REPLAY.warmups, samples = REPLAY.samples } = {}) {
+  /**
+   * Warm-up, then measured runs: the traces of the measured ones. Used by measure_request and fix
+   * verification. A just-started app keeps getting faster for a while (JIT, connection pools,
+   * caches), and a fixed few warm-ups were seen to leave it half warm, which made the same code look
+   * 47% faster on the next measurement. So warm-ups run in windows of `warmups` requests until a
+   * window's median is no longer clearly faster than the one before (or `maxWarmups` is reached).
+   */
+  async function measure(payload, port, { warmups = REPLAY.warmups, maxWarmups = REPLAY.maxWarmups, samples = REPLAY.samples } = {}) {
     const id = randomUUID();
-    for (let i = 0; i < warmups; i++) await send(payload, port, id);
+    const windowMedian = async () => {
+      const ds = [];
+      for (let i = 0; i < warmups; i++) {
+        const t = await send(payload, port, id);
+        if (t) ds.push(t.duration);
+      }
+      return ds.length ? ds.sort((a, b) => a - b)[Math.floor(ds.length / 2)] : null;
+    };
+    let prev = await windowMedian();
+    for (let done = warmups; prev != null && done + warmups <= maxWarmups; done += warmups) {
+      const cur = await windowMedian();
+      if (cur == null || cur >= prev * REPLAY.settled) break;
+      prev = cur;
+    }
     const out = [];
     for (let i = 0; i < samples; i++) {
       const t = await send(payload, port, id);

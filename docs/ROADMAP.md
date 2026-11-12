@@ -121,7 +121,7 @@ New:
 | Phase | Deliverable | Done when |
 |---|---|---|
 | 0 ✅ | Modular refactor, docs, CI | 60 tests pass; identical e2e output on a real API |
-| 1 | Fix the credibility gaps (FEATURES.md "Known gaps" 1–5) | measure compares warm median vs warm median; index hints skip tiny tables and covered filters; `status` shows MCP and recorder versions and warns on mismatch; README pins `@latest` |
+| 1 ✅ | Fix the credibility gaps (FEATURES.md "Known gaps", fixed list) | measure compares warm median vs warm median; index hints skip tiny tables and covered filters; `status` shows MCP and recorder versions and warns on mismatch; README pins `@latest` |
 | 2 | Behavior diff MVP: baseline, fingerprints, diff engine, `backlens diff` CLI + MCP `diff`/`accept` | catches a seeded break (500, shape change, extra query) on a real app in < 5 s for 30 routes; < 1 false alarm per 10 clean runs |
 | 3 | Access broker: login profiles, replay as role, replayable test traffic | an agent measures a signed-in route with zero setup calls |
 | 4 | Harness: `backlens init claude` (Stop-hook gate, MCP config), accept flow | the hook blocks a broken turn and the agent fixes it unaided |

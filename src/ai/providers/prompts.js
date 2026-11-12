@@ -101,7 +101,7 @@ export function issuePrompt(task, issue, ctx, previous) {
   const parts = [
     `Issue: ${issue.title}`,
     `Route: ${issue.route}`,
-    `Seen in ${issue.seen} of ${issue.of} requests, about ${issue.cost} ms lost each time.`,
+    `Seen in ${issue.seen} of ${issue.of} requests; ${issue.type === 'serial' ? `running them together could save up to about ${issue.cost} ms per request (an estimate from recorded traffic)` : `about ${issue.cost} ms of repeated work per request (median)`}.`,
     `Where the code paths part: ${issue.sites.join(' and ')}`,
     `Statements involved:\n${issue.sql}`,
     `backlens's suggested direction: ${issue.fix}`,

@@ -2,11 +2,18 @@
 
 export const ms = (v) => (v == null ? '-' : `${v} ms`);
 export const plural = (n, word) => `${n} ${n === 1 ? word : word.endsWith('y') ? `${word.slice(0, -1)}ies` : `${word}s`}`;
+export const ago = (t) => {
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
+};
 export const at = (f) => (f ? `${f.file}:${f.line}` : '');
 export const indent = (text, pad = '    ') => String(text).split('\n').map((l) => pad + l).join('\n');
 
+/** What an issue costs, said as the estimate it is: medians of recorded traffic, not a measurement. */
+export const costText = (i) => (i.type === 'serial' ? `up to ~${i.cost} ms saved per request if run together (estimate; measure to confirm)` : `~${i.cost} ms of repeated work per request (median)`);
+
 export function issueText(i, n) {
-  const lines = [`${n}. [${i.severity}] ${i.title}`, `   route: ${i.route}   seen in ${i.seen} of ${i.of} requests${i.cost ? `   ~${i.cost} ms lost each time` : ''}`];
+  const lines = [`${n}. [${i.severity}] ${i.title}`, `   route: ${i.route}   seen in ${i.seen} of ${i.of} requests${i.cost ? `   ${costText(i)}` : ''}`];
   if (i.sites && i.sites.length) lines.push(`   code: ${i.sites.join(' -> ')}`);
   if (i.sql) lines.push(`   calls:\n${indent(i.sql, '     ')}`);
   if (i.fix) lines.push(`   fix: ${i.fix}`);

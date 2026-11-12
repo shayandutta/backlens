@@ -20,6 +20,9 @@ export function createStore() {
   const fixedAt = new Map();
   // Issue key -> the index created for it from the dashboard, so Undo still knows it.
   const createdIndexes = new Map();
+  // 'METHOD url' -> the last warm measurement of that request (measure_request / measure_url), so
+  // the next measurement compares warm against warm instead of against cold recorded traffic.
+  const measured = new Map();
   let received = 0;
 
   const store = {
@@ -30,6 +33,7 @@ export function createStore() {
     replays,
     fixedAt,
     createdIndexes,
+    measured,
     get received() {
       return received;
     },

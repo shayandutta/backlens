@@ -109,7 +109,7 @@ These paths are used outside this repo and must not move:
 | `bin/backlens.js` (`backlens` bin) | users, `npx backlens` |
 | `backlens/register` → `src/recorder/index.cjs` | `NODE_OPTIONS=--require backlens/register` |
 | `statusline.js` (package root) | `~/.claude/settings.json` after `backlens statusline --install` |
-| `.backlens/session.json` shape `{ port, token, pid, root, startedAt }` | `backlens mcp` of another version |
+| `.backlens/session.json` shape `{ port, token, pid, root, startedAt, version }` (`version` since 0.6; readers must accept it missing) | `backlens mcp` of another version |
 | dashboard HTTP API `/api/*`, `/ingest`, `/advice`, `/routes`, `/listening` | `ui.html`, `backlens mcp`, the recorder |
 | `backlens.baseline.json` and `stableKey` | committed by users for CI |
 
