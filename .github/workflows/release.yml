@@ -1,7 +1,8 @@
 name: release
 
 # Publishes to npm when a version tag is pushed: git tag v0.6.0 && git push origin v0.6.0
-# Needs the repository secret NPM_TOKEN (an npm automation token).
+# Uses npm trusted publishing (OIDC): the backlens package on npmjs.com trusts this workflow
+# (shayandutta/backlens, release.yml), so no token is stored. An NPM_TOKEN secret, if set, also works.
 on:
   push:
     tags: ['v*']
@@ -24,6 +25,8 @@ jobs:
         run: |
           v="$(node -p "require('./package.json').version")"
           [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME does not match package.json $v"; exit 1; }
+      # Trusted publishing needs npm 11.5.1 or later; Node 22 ships npm 10.
+      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm run check
       - run: npm test

@@ -56,4 +56,4 @@ By contributing you agree your work is released under the [MIT license](LICENSE)
 
 1. Bump `version` in `package.json` (and `package-lock.json` via `npm install --package-lock-only`), add a `CHANGELOG.md` entry.
 2. Merge to `main` with CI green.
-3. Tag and push: `git tag v<version> && git push origin v<version>`. The `release` workflow checks the tag matches `package.json`, runs `check` and the tests, and publishes to npm with provenance (needs the `NPM_TOKEN` repository secret).
+3. Tag and push: `git tag v<version> && git push origin v<version>`. The `release` workflow checks the tag matches `package.json`, runs `check` and the tests, and publishes to npm with provenance through npm trusted publishing (configured on npmjs.com for `shayandutta/backlens`, `release.yml`; no token needed).
